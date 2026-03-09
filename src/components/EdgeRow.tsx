@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useTransition, useEffect } from "react";import EdgeRetractButton from "@/components/EdgeRetractButton";
-import { updateEdgeProperties } from "@/app/actions";
+import { useState, useTransition, useEffect } from "react";
+import EdgeRetractButton from "@/components/EdgeRetractButton";
 import { parseFuzzyTemporal } from "@/lib/dateParser";
+import { updateEdgeProperties } from "@/app/actions";
 
 const FORMAT_ICONS: Record<string, string> = {
   'PHYSICAL_OBJECT': '📦', 'PHYSICAL_CONTAINER': '🗃️', 'IMAGE': '🖼️', 'VIDEO': '🎞️',
@@ -17,7 +18,8 @@ export default function EdgeRow({
   currentTab,
   activeNodeId,
   activeKinds,
-  hideBadge = false
+  hideBadge = false,
+  hideEdit = false // NEW: Prevents editing properties on raw structural edges like CARRIES
 }: {
   edge: any;
   node: any;
@@ -27,10 +29,14 @@ export default function EdgeRow({
   activeNodeId: string;
   activeKinds: any[];
   hideBadge?: boolean;
+  hideEdit?: boolean;
 }) {
   const [isEditing, setIsEditing] = useState(false);
+  
   const [temporalInput, setTemporalInput] = useState(edge.temporalInput || "");
+  const [locator, setLocator] = useState(edge.properties?.locator || "");
   const [liveBounds, setLiveBounds] = useState<{start?: Date, end?: Date}>({});
+  
   const [isPending, startTransition] = useTransition();
 
   const displayPredicate = isSource ? predDef.forwardLabel : predDef.reverseLabel;
@@ -39,7 +45,6 @@ export default function EdgeRow({
   const icon = node.layer === 'INSTANCE' ? (FORMAT_ICONS[node.kind] || '📦') : (kindDef?.icon || '🟣');
   const kindLabel = node.layer === 'INSTANCE' ? node.kind.replace('_', ' ') : (kindDef?.label || 'Concept');
 
-  // Sync live bounds when the user types a temporal bound
   useEffect(() => {
     if (isEditing && temporalInput !== undefined) {
       const parsed = parseFuzzyTemporal(temporalInput);
@@ -49,12 +54,14 @@ export default function EdgeRow({
 
   const handleSave = () => {
     startTransition(async () => {
-      await updateEdgeProperties(edge.id, temporalInput || null);
+      const props = locator.trim() ? { locator: locator.trim() } : {};
+      // Pass null for the deprecated 'role' argument
+      await updateEdgeProperties(edge.id, temporalInput || null, null, props);
       setIsEditing(false);
     });
   };
 
-  if (isEditing) {
+  if (isEditing && !hideEdit) {
     return (
       <div className="p-4 bg-blue-50/50 border border-blue-200 rounded-lg shadow-sm animate-in fade-in flex flex-col gap-3">
         <div className="flex items-center justify-between pb-2 border-b border-blue-100">
@@ -65,27 +72,41 @@ export default function EdgeRow({
           <button onClick={() => setIsEditing(false)} disabled={isPending} className="text-gray-400 hover:text-gray-800 cursor-pointer">✕</button>
         </div>
         
-        <div className="w-full sm:max-w-xs">
-          <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Temporal Bounds</label>
-          <input
-            type="text"
-            value={temporalInput}
-            onChange={e => setTemporalInput(e.target.value)}
-            disabled={isPending}
-            placeholder="e.g. 1995~1998"
-            className="w-full p-2 text-xs border border-gray-200 rounded bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
-          />
-          {(temporalInput || liveBounds.start || liveBounds.end) && (
-            <div className="mt-2 bg-emerald-50/50 border border-emerald-100 p-2.5 rounded-md w-fit">
-              <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-widest block mb-1">
-                ↳ System Boundaries:
-              </span>
-              <div className="font-mono text-[10px] text-emerald-900 flex flex-col gap-0.5">
-                <span>Not earlier than: <strong className="font-bold ml-1">{liveBounds.start ? liveBounds.start.toISOString().split('T')[0] : 'Open'}</strong></span>
-                <span>Not later than: <strong className="font-bold ml-3">{liveBounds.end ? liveBounds.end.toISOString().split('T')[0] : 'Open'}</strong></span>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Temporal Bounds</label>
+            <input
+              type="text"
+              value={temporalInput}
+              onChange={e => setTemporalInput(e.target.value)}
+              disabled={isPending}
+              placeholder="e.g. 1995~1998"
+              className="w-full p-2 text-xs border border-gray-200 rounded bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
+            />
+            {(temporalInput || liveBounds.start || liveBounds.end) && (
+              <div className="mt-2 bg-emerald-50/50 border border-emerald-100 p-2.5 rounded-md w-fit">
+                <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-widest block mb-1">
+                  ↳ System Boundaries:
+                </span>
+                <div className="font-mono text-[10px] text-emerald-900 flex flex-col gap-0.5">
+                  <span>Not earlier than: <strong className="font-bold ml-1">{liveBounds.start ? liveBounds.start.toISOString().split('T')[0] : 'Open'}</strong></span>
+                  <span>Not later than: <strong className="font-bold ml-3">{liveBounds.end ? liveBounds.end.toISOString().split('T')[0] : 'Open'}</strong></span>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Locator / Position</label>
+            <input
+              type="text"
+              value={locator}
+              onChange={e => setLocator(e.target.value)}
+              disabled={isPending}
+              placeholder="e.g. Page 42, 01:24-01:45"
+              className="w-full p-2 text-xs border border-gray-200 rounded bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
+            />
+            <p className="text-[10px] text-gray-400 mt-1.5 font-medium leading-tight">Specify where this subject appears or exactly where this interaction occurred.</p>
+          </div>
         </div>
 
         <div className="flex gap-2 justify-end mt-2 pt-2 border-t border-blue-100">
@@ -114,27 +135,29 @@ export default function EdgeRow({
             )}
           </span>
         </a>
+
+        {locator && (
+          <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-200" title="Locator / Position">
+            📍 {locator}
+          </span>
+        )}
         
         {edge.temporalInput && (
           <span className="text-[10px] font-mono bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded border border-gray-200" title="Relationship Temporal Bounds">
             ⏱ {edge.temporalInput}
           </span>
         )}
-
-        {edge.role && (
-          <span className="text-[10px] font-bold uppercase tracking-wider bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200" title="Relationship Role">
-            🎭 {edge.role}
-          </span>
-        )}
         
-        <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button 
-              onClick={() => setIsEditing(true)}
-              className="text-xs font-medium text-blue-600 px-2 py-1.5 hover:bg-blue-50 rounded-md cursor-pointer transition-colors" 
-              title="Edit Edge Properties"
-            >
-              ✎ Edit
-            </button>
+        <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pl-2">
+            {!hideEdit && (
+              <button 
+                onClick={() => setIsEditing(true)}
+                className="text-xs font-medium text-blue-600 px-2 py-1.5 hover:bg-blue-50 rounded-md cursor-pointer transition-colors" 
+                title="Edit Edge Properties"
+              >
+                ✎ Edit
+              </button>
+            )}
           <EdgeRetractButton edgeId={edge.id} />
         </div>
       </div>

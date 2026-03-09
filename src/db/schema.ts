@@ -9,7 +9,8 @@ export const SYSTEM_PREDICATES = {
   CARRIES: '00000000-0000-4000-8000-000000000001',
   DERIVED_FROM: '00000000-0000-4000-8000-000000000002',
   CONTAINS: '00000000-0000-4000-8000-000000000003',
-  REFERENCES: '00000000-0000-4000-8000-000000000004', // NEW: For Media Appearances / Identified Subjects
+  // REFERENCES has been intentionally removed. 
+  // Locators (pages, coordinates, timestamps) are now handled via the JSONB properties column on standard semantic edges!
 };
 
 // ============================================================================
@@ -44,7 +45,6 @@ export const nodes = pgTable('nodes', {
   
   label: text('label').notNull(),
   
-  // FIX: Use Drizzle's native array default instead of raw SQL to prevent migration crashes
   aliases: text('aliases').array().notNull().default([]), 
   
   // Fuzzy Temporal Bounds
@@ -68,13 +68,12 @@ export const edges = pgTable('edges', {
   sourceId: uuid('source_id').notNull(),
   targetId: uuid('target_id').notNull(),
   
-  // CHANGED: We now point to the Predicate dictionary, not raw text!
   predicateId: uuid('predicate_id').notNull(), 
   
   category: text('category').notNull(), 
   role: text('role'), 
   
-  // NEW: Edge Properties for Positional Data (coordinates, timestamps, pages)
+  // Edge Properties for Positional Data (coordinates, timestamps, pages)
   properties: jsonb('properties').notNull().default({}),
   
   sourceSortOrder: integer('source_sort_order').default(999).notNull(),

@@ -22,7 +22,7 @@ export default async function RootLayout({
     layer: node.layer as "IDENTITY" | "INSTANCE"
   }));
 
-  // NEW: Fetch the active dictionary kinds for the sidebar
+  // Fetch the active dictionary kinds for the sidebar's Track 1 Creation Dropdown
   const allKinds = await getAllKinds();
   const activeKinds = allKinds.filter(k => k.isActive);
 
@@ -33,7 +33,7 @@ export default async function RootLayout({
         <Sidebar initialNodes={nodes} activeKinds={activeKinds} />
         
         {/* The Main Panel (page.tsx) fills the remaining space */}
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto relative">
           {children}
         </main>
       </body>

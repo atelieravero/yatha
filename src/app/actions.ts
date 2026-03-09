@@ -166,12 +166,11 @@ export async function getAllPredicates() {
 }
 
 export async function seedSystemPredicates() {
+  // REMOVED references crutch from seeding!
   const systemPreds = [
     { id: SYSTEM_PREDICATES.CARRIES, forwardLabel: 'CARRIES', reverseLabel: 'instantiated in', isSymmetric: false, isSystem: true, isActive: true },
     { id: SYSTEM_PREDICATES.DERIVED_FROM, forwardLabel: 'DERIVED FROM', reverseLabel: 'source of', isSymmetric: false, isSystem: true, isActive: true },
     { id: SYSTEM_PREDICATES.CONTAINS, forwardLabel: 'CONTAINS', reverseLabel: 'part of', isSymmetric: false, isSystem: true, isActive: true },
-    // NEW: System predicate for media tags/identified subjects
-    { id: SYSTEM_PREDICATES.REFERENCES, forwardLabel: 'REFERENCES', reverseLabel: 'referenced in', isSymmetric: false, isSystem: true, isActive: true }, 
   ];
   for (const pred of systemPreds) {
     // Upsert prevents crashing if they already exist in the DB
@@ -235,63 +234,33 @@ export async function createNode(label: string, layer: "IDENTITY" | "INSTANCE", 
 }
 
 export async function updateNodeLabel(nodeId: string, label: string) {
-  // 1. Capture snapshot for the ledger
   await captureNodeSnapshot(nodeId);
-
-  // 2. Apply the update
-  await db.update(nodes)
-    .set({ 
-      label, 
-      updatedAt: new Date() 
-    })
-    .where(eq(nodes.id, nodeId));
-  
+  await db.update(nodes).set({ label, updatedAt: new Date() }).where(eq(nodes.id, nodeId));
   revalidatePath('/');
 }
 
 export async function updateNodeKind(nodeId: string, kind: string) {
-  // 1. Capture snapshot for the ledger
   await captureNodeSnapshot(nodeId);
-
-  // 2. Apply the update
-  await db.update(nodes)
-    .set({ 
-      kind: kind,
-      updatedAt: new Date() 
-    })
-    .where(eq(nodes.id, nodeId));
-  
+  await db.update(nodes).set({ kind: kind, updatedAt: new Date() }).where(eq(nodes.id, nodeId));
   revalidatePath('/');
 }
 
 export async function updateNodeAliases(nodeId: string, aliases: string[]) {
-  // 1. Capture snapshot for the ledger
   await captureNodeSnapshot(nodeId);
-
-  // 2. Apply the update
-  await db.update(nodes)
-    .set({ 
-      aliases, 
-      updatedAt: new Date() 
-    })
-    .where(eq(nodes.id, nodeId));
-  
+  await db.update(nodes).set({ aliases, updatedAt: new Date() }).where(eq(nodes.id, nodeId));
   revalidatePath('/');
 }
 
 export async function updateNodeProperties(nodeId: string, newProps: any) {
-  // 1. Capture snapshot for the ledger AND get the current state
   const currentNode = await captureNodeSnapshot(nodeId);
   const existingProps = (currentNode.properties as Record<string, any>) || {};
   
-  // 2. Preserve strictly managed system properties
   const updatedProps = { ...newProps };
   if (existingProps.fileUrl) updatedProps.fileUrl = existingProps.fileUrl;
   if (existingProps.mimeType) updatedProps.mimeType = existingProps.mimeType;
   if (existingProps.fileSize) updatedProps.fileSize = existingProps.fileSize;
   if (existingProps.hash) updatedProps.hash = existingProps.hash;
 
-  // --- NEW: TEMPORAL PARSER INTERCEPTION ---
   let temporalInput = currentNode.temporalInput;
   let notEarlierThan = currentNode.notEarlierThan;
   let notLaterThan = currentNode.notLaterThan;
@@ -303,7 +272,6 @@ export async function updateNodeProperties(nodeId: string, newProps: any) {
     notLaterThan = bounds.notLaterThan || null;
   }
 
-  // 3. Save back to the JSONB column AND update native temporal columns
   await db.update(nodes)
     .set({ 
       properties: updatedProps,
@@ -321,14 +289,11 @@ export async function updateNodeProperties(nodeId: string, newProps: any) {
 // MEDIA HANDLING (Cloudflare R2)
 // ============================================================================
 
-// 1. Ask Cloudflare for a secure upload ticket (PUT)
 export async function getUploadTicket(filename: string, contentType: string) {
   return await generateUploadUrl(filename, contentType);
 }
 
-// 2. Save the resulting Cloudflare URL and file metadata into the Node's JSONB properties
 export async function attachFileToNode(nodeId: string, fileUrl: string, mimeType: string, fileSize: number, hash: string) {
-  // Capture snapshot before attaching media properties
   const currentNode = await captureNodeSnapshot(nodeId);
   const existingProps = (currentNode.properties as Record<string, any>) || {};
   
@@ -358,7 +323,6 @@ export async function attachFileToNode(nodeId: string, fileUrl: string, mimeType
   revalidatePath('/'); 
 }
 
-// 3. Ask Cloudflare for a secure read ticket (GET) for private viewing
 export async function getSecureMediaUrl(filename: string) {
   return await generateReadUrl(filename);
 }
@@ -374,61 +338,52 @@ function parseFuzzyTemporal(fuzzyDateStr?: string | null): { notEarlierThan?: Da
     const str = fuzzyDateStr.toLowerCase().trim();
     let parts: string[];
     
-    // Support range inputs, including open-ended "1988-"
     if (str.includes('~')) {
       parts = str.split('~').map(s => s.trim());
     } else if (str.match(/^-?\d{1,4}-$/)) {
-      parts = [str.slice(0, -1), ""]; // Split into ["1988", ""]
+      parts = [str.slice(0, -1), ""]; 
     } else {
       parts = [str];
     }
 
-    // Helper: Safely generate exact UTC dates while bypassing JS's annoying 1900-1999 assumption
     const createUTC = (y: number, m: number, d: number, isEnd: boolean) => {
       const date = new Date(Date.UTC(y, m, d, isEnd ? 23 : 0, isEnd ? 59 : 0, isEnd ? 59 : 0, isEnd ? 999 : 0));
-      if (y >= 0 && y < 100) date.setUTCFullYear(y); // Force the year to stay 0-99
+      if (y >= 0 && y < 100) date.setUTCFullYear(y); 
       return date;
     };
     
     const parsePart = (p: string, isStart: boolean): Date | null | undefined => {
-      if (!p || p === '?') return null; // Interpreted as open/unknown boundary
+      if (!p || p === '?') return null; 
 
-      // 1. Century (e.g., "17th century", "1st century")
       const centuryMatch = p.match(/^(\d+)(st|nd|rd|th)?\s*century$/);
       if (centuryMatch) {
         const century = parseInt(centuryMatch[1]);
-        const startYear = (century - 1) * 100 + 1; // e.g. 17th -> 1601
-        const endYear = century * 100;             // e.g. 17th -> 1700
+        const startYear = (century - 1) * 100 + 1; 
+        const endYear = century * 100;             
         return isStart ? createUTC(startYear, 0, 1, false) : createUTC(endYear, 11, 31, true);
       }
 
-      // 2. Decade (e.g., "1980s")
       const decadeMatch = p.match(/^(\d{3,4})s$/);
       if (decadeMatch) {
         const decade = parseInt(decadeMatch[1]);
         return isStart ? createUTC(decade, 0, 1, false) : createUTC(decade + 9, 11, 31, true);
       }
 
-      // 3. Strict ISO-ish formats (YYYY, YYYY-MM, YYYY-MM-DD)
       const dateMatch = p.match(/^(-?(?:0|[1-9]\d{0,3}))(?:-(0?[1-9]|1[0-2]))?(?:-(0?[1-9]|[12]\d|3[01]))?$/);
       if (dateMatch) {
         const year = parseInt(dateMatch[1]);
         const month = dateMatch[2] ? parseInt(dateMatch[2]) - 1 : undefined;
         const day = dateMatch[3] ? parseInt(dateMatch[3]) : undefined;
         
-        // App-crash defense
         if (year > 10000 || year < -10000) return undefined;
         
         if (month === undefined) {
           return isStart ? createUTC(year, 0, 1, false) : createUTC(year, 11, 31, true);
         } else if (day === undefined) {
           if (month < 0 || month > 11) return undefined;
-          
           let tmp = new Date(Date.UTC(year, month + 1, 0));
           if (year >= 0 && year < 100) tmp.setUTCFullYear(year);
-          const lastDay = tmp.getUTCDate();
-          
-          return isStart ? createUTC(year, month, 1, false) : createUTC(year, month, lastDay, true);
+          return isStart ? createUTC(year, month, 1, false) : createUTC(year, month, tmp.getUTCDate(), true);
         } else {
           if (month < 0 || month > 11 || day < 1 || day > 31) return undefined;
           return isStart ? createUTC(year, month, day, false) : createUTC(year, month, day, true);
@@ -444,17 +399,13 @@ function parseFuzzyTemporal(fuzzyDateStr?: string | null): { notEarlierThan?: Da
     if (parts.length === 1) {
        const start = parsePart(parts[0], true);
        const end = parsePart(parts[0], false);
-       
        if (start === undefined || end === undefined) return {};
-       
        notEarlierThan = start === null ? undefined : start;
        notLaterThan = end === null ? undefined : end;
     } else if (parts.length === 2) {
        const start = parsePart(parts[0], true);
        const end = parsePart(parts[1], false);
-       
        if (start === undefined || end === undefined) return {};
-       
        notEarlierThan = start === null ? undefined : start;
        notLaterThan = end === null ? undefined : end;
     }
@@ -530,10 +481,10 @@ export async function retractEdge(edgeId: string) {
 
 export async function updateEdgeProperties(
   edgeId: string, 
-  newTemporalInput: string | null,
-  newProperties?: Record<string, any> // NEW: Allow updating JSONB properties safely
+  newTemporalInput: string | null, 
+  newRole: string | null,
+  newProperties?: Record<string, any> // Allow updating JSONB properties safely
 ) {
-  // 1. Fetch the existing edge so we can duplicate its core structure
   const [existingEdge] = await db.select().from(edges).where(eq(edges.id, edgeId));
   
   if (!existingEdge) {
@@ -541,34 +492,26 @@ export async function updateEdgeProperties(
   }
 
   const bounds = parseFuzzyTemporal(newTemporalInput);
-  
-  // Merge properties so we don't accidentally wipe data
+
   const updatedProps = newProperties ? { ...(existingEdge.properties as Record<string, any>), ...newProperties } : existingEdge.properties;
 
-  // 2. Soft delete the old edge (Retract it)
   await db.update(edges)
     .set({ isActive: false, retractedAt: new Date() })
     .where(eq(edges.id, edgeId));
 
-  // 3. Assert the new edge with the updated properties
   await db.insert(edges).values({
     sourceId: existingEdge.sourceId,
     targetId: existingEdge.targetId,
     predicateId: existingEdge.predicateId,
     category: existingEdge.category as "SEMANTIC" | "STRUCTURAL" | "LINEAGE",
-    
-    // The updated properties:
     temporalInput: newTemporalInput || null,
     notEarlierThan: bounds.notEarlierThan || null,
     notLaterThan: bounds.notLaterThan || null,
-    role: existingEdge.role, 
+    role: newRole || null,
     properties: updatedProps,
-    
-    // Maintain the old sort order
     sourceSortOrder: existingEdge.sourceSortOrder,
     targetSortOrder: existingEdge.targetSortOrder,
-    
-    assertedBy: 'system_user_edit', // Represents an edited assertion
+    assertedBy: 'system_user_edit', 
     isActive: true,
     retractedAt: null, 
   });
@@ -581,7 +524,6 @@ export async function updateEdgeProperties(
 // ============================================================================
 
 export async function getQuickContext(nodeId: string) {
-  // 1. Fetch active edges connected to this node
   const connectedEdges = await db
     .select()
     .from(edges)
@@ -594,10 +536,8 @@ export async function getQuickContext(nodeId: string) {
 
   if (connectedEdges.length === 0) return [];
 
-  // 2. Fetch the predicates to resolve the labels
   const allPreds = await db.select().from(predicates);
 
-  // 3. Get unique related node IDs and fetch their labels
   const relatedNodeIds = connectedEdges.map(e => e.sourceId === nodeId ? e.targetId : e.sourceId);
   const uniqueNodeIds = Array.from(new Set(relatedNodeIds));
 
@@ -606,7 +546,6 @@ export async function getQuickContext(nodeId: string) {
     .from(nodes)
     .where(inArray(nodes.id, uniqueNodeIds));
 
-  // 4. Map it all together for the lightweight Peek Drawer view
   return connectedEdges.map(edge => {
     const isSource = edge.sourceId === nodeId;
     const targetNodeId = isSource ? edge.targetId : edge.sourceId;
@@ -631,7 +570,6 @@ export async function createPhysicalHolding(
   label: string,
   properties: Record<string, any>
 ) {
-  // 1. Mint the Physical Instance
   const [newNode] = await db.insert(nodes).values({
     layer: 'INSTANCE',
     kind: 'PHYSICAL_OBJECT',
@@ -640,7 +578,6 @@ export async function createPhysicalHolding(
     updatedBy: "system_user", 
   }).returning({ id: nodes.id });
 
-  // 2. Assert the CARRIES edge (Bridging Layer 2 to Layer 1)
   await db.insert(edges).values({
     sourceId: newNode.id,
     targetId: identityId,
@@ -655,7 +592,7 @@ export async function createPhysicalHolding(
 }
 
 export async function createDigitalArtifact(
-  identityId: string,
+  targetId: string, // UPDATED: Changed from identityId to targetId (supports [Media] -> CARRIES -> [Physical])
   label: string,
   kind: string,
   fileData: { fileUrl: string, mimeType: string, fileSize: number, hash: string },
@@ -670,7 +607,6 @@ export async function createDigitalArtifact(
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  // 1. Mint the Digital Instance
   const [newNode] = await db.insert(nodes).values({
     layer: 'INSTANCE',
     kind,
@@ -684,10 +620,10 @@ export async function createDigitalArtifact(
     updatedBy: "system_user", 
   }).returning({ id: nodes.id });
 
-  // 2. Assert the CARRIES edge to the Identity
+  // Asserts the CARRIES edge to the Target (Identity OR Physical Instance)
   await db.insert(edges).values({
     sourceId: newNode.id,
-    targetId: identityId,
+    targetId: targetId,
     predicateId: SYSTEM_PREDICATES.CARRIES,
     category: "STRUCTURAL",
     role: role || null,
@@ -695,7 +631,6 @@ export async function createDigitalArtifact(
     isActive: true,
   });
 
-  // 3. Optional: Assert DERIVED_FROM edge for Lineage
   if (derivedFromId) {
     await db.insert(edges).values({
       sourceId: newNode.id,
@@ -712,7 +647,6 @@ export async function createDigitalArtifact(
 }
 
 export async function checkDuplicateArtifact(hash: string) {
-  // Queries the JSONB column for an exact hash match
   const [existing] = await db
     .select({ id: nodes.id, label: nodes.label, kind: nodes.kind })
     .from(nodes)
@@ -721,11 +655,11 @@ export async function checkDuplicateArtifact(hash: string) {
   return existing || null;
 }
 
-export async function linkExistingArtifact(identityId: string, instanceId: string, role?: string) {
-  // Reuses an existing Layer 2 Instance by asserting a new CARRIES edge to this Layer 1 Identity
+export async function linkExistingArtifact(targetId: string, instanceId: string, role?: string) {
+  // UPDATED: Reuses an existing Layer 2 Instance by asserting a new CARRIES edge to this specific target
   await db.insert(edges).values({
     sourceId: instanceId,
-    targetId: identityId,
+    targetId: targetId,
     predicateId: SYSTEM_PREDICATES.CARRIES,
     category: "STRUCTURAL",
     role: role || null,
@@ -736,7 +670,6 @@ export async function linkExistingArtifact(identityId: string, instanceId: strin
 }
 
 export async function createAndLinkIdentity(label: string, kind: string, sourceId: string, predicateId: string, isReverse: boolean) {
-  // 1. Mint the new Identity
   const [newNode] = await db.insert(nodes).values({
     layer: 'IDENTITY',
     kind: kind,
@@ -744,7 +677,6 @@ export async function createAndLinkIdentity(label: string, kind: string, sourceI
     updatedBy: "system_user", 
   }).returning({ id: nodes.id });
 
-  // 2. Determine edge direction
   let finalSource = sourceId;
   let finalTarget = newNode.id;
   if (isReverse) {
@@ -752,7 +684,6 @@ export async function createAndLinkIdentity(label: string, kind: string, sourceI
     finalTarget = sourceId;
   }
 
-  // 3. Assert the semantic edge
   await db.insert(edges).values({
     sourceId: finalSource,
     targetId: finalTarget,
@@ -762,5 +693,35 @@ export async function createAndLinkIdentity(label: string, kind: string, sourceI
     isActive: true,
   });
 
+  revalidatePath('/');
+}
+
+// NEW: Facilitates the Lineage Builder's inheritance trick
+export async function inheritCarriedIdentities(derivativeId: string, originalId: string) {
+  // Find all CARRIES edges where the original acts as the source
+  const originalCarries = await db.select().from(edges).where(
+    and(
+      eq(edges.sourceId, originalId),
+      eq(edges.predicateId, SYSTEM_PREDICATES.CARRIES),
+      eq(edges.isActive, true)
+    )
+  );
+
+  // For each one, assert a duplicate structural edge for the derivative
+  for (const edge of originalCarries) {
+    await db.insert(edges).values({
+      sourceId: derivativeId,
+      targetId: edge.targetId,
+      predicateId: SYSTEM_PREDICATES.CARRIES,
+      category: "STRUCTURAL",
+      role: edge.role,
+      properties: edge.properties,
+      sourceSortOrder: edge.sourceSortOrder,
+      targetSortOrder: edge.targetSortOrder,
+      assertedBy: 'system_user_inherit',
+      isActive: true,
+    });
+  }
+  
   revalidatePath('/');
 }

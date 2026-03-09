@@ -10,12 +10,10 @@ import NodeClassification from "@/components/NodeClassification";
 import AliasEditor from "@/components/AliasEditor";
 import NodeHistoryViewer from "@/components/NodeHistoryViewer";
 import NodeLabelEditor from "@/components/NodeLabelEditor";
-import PhysicalHoldingBuilder from "@/components/PhysicalHoldingBuilder";
 import ContainmentBuilder from "@/components/ContainmentBuilder";
+import StructuralBuilder from "@/components/StructuralBuilder";
 import PeekDrawer from "@/components/PeekDrawer";
 import EdgeRow from "@/components/EdgeRow";
-import ReferenceRow from "@/components/ReferenceRow";
-import MediaReferenceBuilder from "@/components/MediaReferenceBuilder";
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -43,7 +41,6 @@ export default async function Home({
 }) {
   const params = await searchParams;
   
-  // Safely normalize arrays to strings if multiple params are present
   const rawNodeId = params?.node;
   const nodeId = Array.isArray(rawNodeId) ? rawNodeId[0] : rawNodeId;
 
@@ -76,7 +73,7 @@ export default async function Home({
           <span className="text-5xl block mb-4">⚠️</span>
           <h2 className="text-lg font-bold text-gray-900 mb-2">Database Sync Required</h2>
           <p className="text-sm text-gray-600 mb-6">
-            We recently updated the graph engine to support positional references, but your local database is missing the new <code className="bg-gray-100 px-1 py-0.5 rounded text-red-500">properties</code> column on the edges table.
+            We recently updated the graph engine.
           </p>
           <div className="bg-gray-900 text-gray-100 text-xs font-mono p-4 rounded-lg text-left overflow-x-auto shadow-inner">
             npx drizzle-kit push
@@ -100,12 +97,9 @@ export default async function Home({
   const nodeProps = (activeNode.properties as Record<string, any>) || {};
   const hasFile = !!nodeProps.fileUrl;
   
-  // Format detection for native players
   const isImage = hasFile && nodeProps.mimeType?.startsWith('image/');
   const isVideo = hasFile && nodeProps.mimeType?.startsWith('video/');
   const isAudio = hasFile && nodeProps.mimeType?.startsWith('audio/');
-  
-  // Intercept external URLs so we don't request Cloudflare tickets for them
   const isWebLink = activeNode.kind === 'WEB_LINK';
   const isYouTube = activeNode.kind === 'YOUTUBE_VIDEO';
 
@@ -130,8 +124,8 @@ export default async function Home({
   if (peekId) {
     peekNode = allNodes.find(n => n.id === peekId);
     const peekProps = (peekNode?.properties as Record<string, any>) || {};
-    
     const peekIsWeb = peekNode?.kind === 'WEB_LINK' || peekNode?.kind === 'YOUTUBE_VIDEO';
+    
     if (peekNode && peekProps.fileUrl && !peekIsWeb) {
       const filename = peekProps.fileUrl.split('/').pop();
       if (filename) securePeekUrl = await getSecureMediaUrl(filename);
@@ -141,59 +135,61 @@ export default async function Home({
   }
 
   // ============================================================================
-  // THE UI MANIFEST: Routing Edges into UX Blocks
+  // 3-LAYER UI MANIFEST: Routing Edges into Strict UI Blocks
   // ============================================================================
   const isIdentity = activeNode.layer === 'IDENTITY';
   const isPhysical = !isIdentity && (activeNode.kind === 'PHYSICAL_OBJECT' || activeNode.kind === 'PHYSICAL_CONTAINER');
   const isMedia = !isIdentity && !isPhysical;
 
-  // Set smart default tabs based on the actual node state
   const rawTab = params?.tab;
-  const currentTab = rawTab ? (Array.isArray(rawTab) ? rawTab[0] : rawTab) : (isIdentity ? 'digital' : (isPhysical ? 'appearances' : 'subjects')); 
+  const currentTab = rawTab ? (Array.isArray(rawTab) ? rawTab[0] : rawTab) : (isIdentity || isPhysical ? 'digital' : 'collections'); 
   
   const physicalHoldings: { edge: any, node: any, isSource: boolean }[] = [];
   const digitalArtifacts: { edge: any, node: any, isSource: boolean }[] = [];
   const mediaAppearances: { edge: any, node: any, isSource: boolean }[] = []; 
-  const identifiedSubjects: { edge: any, node: any, isSource: boolean }[] = []; 
-  const structuralCollections: { edge: any, node: any, isSource: boolean }[] = [];
-  const conceptualLinks: { edge: any, node: any, isSource: boolean }[] = [];
-  const containerContents: { edge: any, node: any, isSource: boolean }[] = [];
-  const semanticEdges: { edge: any, node: any, isSource: boolean }[] = [];
+  const conceptualSemantics: { edge: any, node: any, isSource: boolean }[] = []; 
+  
+  // Split structural links out
+  const bridgedConcepts: { edge: any, node: any, isSource: boolean }[] = []; // Media/Physical -> CARRIES -> Identity
+  const physicalSources: { edge: any, node: any, isSource: boolean }[] = []; // Media -> CARRIES -> Physical
+  
+  // Split collections
+  const containedIn: { edge: any, node: any, isSource: boolean }[] = [];
+  const containsItems: { edge: any, node: any, isSource: boolean }[] = [];
 
   connectedEdges.forEach(edge => {
     const isSource = edge.sourceId === activeNode.id;
     const node = allNodes.find(n => n.id === (isSource ? edge.targetId : edge.sourceId));
     if (!node) return;
 
-    // 1. Intercept REFERENCES for our new Media Tags blocks
-    if (edge.predicateId === SYSTEM_PREDICATES.REFERENCES) {
-      if (!isSource) {
-        // This node is the Subject (Identity or Physical Object) being referenced
-        mediaAppearances.push({ edge, node, isSource });
-      } else {
-        // This node is the Media referencing the other subject
-        identifiedSubjects.push({ edge, node, isSource });
-      }
-      return;
-    }
+    const nodeIsIdentity = node.layer === 'IDENTITY';
+    const nodeIsPhysical = !nodeIsIdentity && (node.kind === 'PHYSICAL_OBJECT' || node.kind === 'PHYSICAL_CONTAINER');
+    const nodeIsMedia = !nodeIsIdentity && !nodeIsPhysical;
 
-    // 2. Standard Routing
-    if (isIdentity) {
-      if (!isSource && edge.predicateId === SYSTEM_PREDICATES.CARRIES) {
-        if (node.kind === 'PHYSICAL_OBJECT' || node.kind === 'PHYSICAL_CONTAINER') physicalHoldings.push({ edge, node, isSource });
-        else digitalArtifacts.push({ edge, node, isSource });
-      } else if (isSource && edge.predicateId === SYSTEM_PREDICATES.CONTAINS) {
-        structuralCollections.push({ edge, node, isSource });
+    // 1. STRUCTURAL (CARRIES)
+    if (edge.predicateId === SYSTEM_PREDICATES.CARRIES) {
+      if (!isSource) {
+        // Something is carrying this activeNode
+        if (nodeIsPhysical) physicalHoldings.push({ edge, node, isSource });
+        else if (nodeIsMedia) digitalArtifacts.push({ edge, node, isSource });
       } else {
-        semanticEdges.push({ edge, node, isSource });
+        // This activeNode is carrying something
+        if (nodeIsIdentity) bridgedConcepts.push({ edge, node, isSource });
+        else if (nodeIsPhysical) physicalSources.push({ edge, node, isSource });
       }
-    } else {
-      if (isSource && edge.predicateId === SYSTEM_PREDICATES.CARRIES) {
-        conceptualLinks.push({ edge, node, isSource });
-      } else if (isSource && edge.predicateId === SYSTEM_PREDICATES.CONTAINS) {
-        containerContents.push({ edge, node, isSource });
+    } 
+    // 2. AGGREGATION (CONTAINS)
+    else if (edge.predicateId === SYSTEM_PREDICATES.CONTAINS) {
+      if (isSource) containsItems.push({ edge, node, isSource }); // This node CONTAINS the target
+      else containedIn.push({ edge, node, isSource }); // This node is CONTAINED IN the target
+    } 
+    // 3. SEMANTICS
+    else if (edge.predicateId !== SYSTEM_PREDICATES.DERIVED_FROM) {
+      if (isMedia) {
+        conceptualSemantics.push({ edge, node, isSource });
       } else {
-        semanticEdges.push({ edge, node, isSource });
+        if (nodeIsMedia) mediaAppearances.push({ edge, node, isSource });
+        else conceptualSemantics.push({ edge, node, isSource });
       }
     }
   });
@@ -205,50 +201,6 @@ export default async function Home({
   });
 
   const physicalHoldingOptions = physicalHoldings.map(h => ({ id: h.node.id, label: h.node.label }));
-
-  const getIcon = (node: any) => {
-    if (node.layer === 'INSTANCE') return FORMAT_ICONS[node.kind] || '📦';
-    const kindDef = activeKinds.find(k => k.id === node.kind);
-    return kindDef?.icon || '🟣';
-  };
-
-  const getKindLabel = (node: any) => {
-    if (node.layer === 'INSTANCE') return (node.kind || '').replace('_', ' ');
-    const kindDef = activeKinds.find(k => k.id === node.kind);
-    return kindDef?.label || 'Concept';
-  };
-
-  const renderPhysicalHoldingRow = ({ edge, node }: any) => {
-    const props = node.properties || {};
-    return (
-      <div key={edge.id} className="group p-3 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow flex justify-between items-start">
-        <div className="overflow-hidden">
-          <a href={`/?node=${activeNode.id}&tab=${currentTab}&peek=${node.id}`} className="font-medium text-sm text-gray-900 hover:text-blue-600 hover:underline flex items-center gap-1.5 cursor-pointer mb-1.5 max-w-full">
-            <span className="opacity-80 text-xs shrink-0" title={getKindLabel(node)}>{getIcon(node)}</span>
-            <span className="truncate block">
-              {node.label}
-              {node.aliases && node.aliases.length > 0 && (
-                <span className="text-gray-400 font-normal ml-1.5 text-xs">({node.aliases.join(', ')})</span>
-              )}
-            </span>
-          </a>
-          
-          <div className="flex flex-wrap gap-2 text-[10px] uppercase tracking-wider font-bold">
-            {props.location && (
-              <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200">📍 {props.location}</span>
-            )}
-            {props.call_number && (
-              <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200 font-mono">#️⃣ {props.call_number}</span>
-            )}
-            {props.condition && (
-              <span className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200">🔍 {props.condition}</span>
-            )}
-          </div>
-        </div>
-        <EdgeRetractButton edgeId={edge.id} />
-      </div>
-    );
-  };
 
   return (
     <div className="max-w-4xl mx-auto p-8 md:p-12 pb-32">
@@ -273,37 +225,74 @@ export default async function Home({
         <AliasEditor nodeId={activeNode.id} initialAliases={activeNode.aliases || []} />
       </div>
 
-      {/* 2. CONCEPTUAL LINK BANNER (Instances Only) */}
+      {/* 2. BRIDGED CONCEPT BLOCK (Instances Only) */}
       {!isIdentity && (
-        <div className="mb-6">
-          {conceptualLinks.map(({edge, node}) => (
-            <div key={edge.id} className="p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between shadow-sm">
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">{getIcon(node)}</span>
-                <div>
-                  <div className="text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-0.5">Bridged Identity</div>
-                  <a href={`/?node=${activeNode.id}&tab=${currentTab}&peek=${node.id}`} className="font-serif text-xl font-medium text-blue-900 hover:underline">{node.label}</a>
-                </div>
-              </div>
-              <EdgeRetractButton edgeId={edge.id} />
-            </div>
-          ))}
-          {conceptualLinks.length === 0 && (
-            <div className="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex items-center justify-between">
-              <div className="flex items-center gap-3 opacity-60">
+        <section className="mb-6 bg-white p-5 border border-blue-200 rounded-xl shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-blue-100 pb-3 mb-4">
+             <h2 className="text-sm font-bold text-blue-900 flex items-center gap-2"><span>💡</span> Bridged Concept</h2>
+             <StructuralBuilder sourceNodeId={activeNode.id} targetType="IDENTITY" direction="FORWARD" allNodes={allNodes as any} activeKinds={activeKinds} />
+          </div>
+          <div className="space-y-2">
+            {bridgedConcepts.length === 0 ? (
+              <div className="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex items-center gap-3 opacity-60">
                 <span className="text-2xl">🟣</span>
                 <div>
                   <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">Orphaned Artifact</div>
-                  <span className="font-serif text-lg font-medium text-gray-600">Not linked to a concept.</span>
+                  <span className="font-serif text-sm font-medium text-gray-600">Not linked to a Layer 1 Concept.</span>
                 </div>
               </div>
-            </div>
-          )}
-        </div>
+            ) : bridgedConcepts.map(item => (
+              <EdgeRow 
+                key={item.edge.id} 
+                edge={item.edge} 
+                node={item.node} 
+                isSource={item.isSource} 
+                predDef={allPredicates.find(p => p.id === item.edge.predicateId) || { forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} 
+                currentTab={currentTab} 
+                activeNodeId={activeNode.id} 
+                activeKinds={activeKinds} 
+                hideEdit={true} // CARRIES edges do not have temporal/locator properties
+              />
+            ))}
+          </div>
+        </section>
       )}
 
-      {/* 3. MEDIA VIEWER (Instances Only) */}
-      {!isIdentity && isMedia && (
+      {/* 2b. PHYSICAL SOURCE BLOCK (Media Only) */}
+      {isMedia && (
+        <section className="mb-6 bg-white p-5 border border-amber-200 rounded-xl shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-amber-100 pb-3 mb-4">
+            <h2 className="text-sm font-bold text-amber-900 flex items-center gap-2"><span>📦</span> Physical Source Material</h2>
+            <StructuralBuilder sourceNodeId={activeNode.id} targetType="PHYSICAL" direction="FORWARD" allNodes={allNodes as any} activeKinds={activeKinds} />
+          </div>
+          <div className="space-y-2">
+            {physicalSources.length === 0 ? (
+              <div className="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl flex items-center gap-3 opacity-60">
+                <span className="text-2xl">☁️</span>
+                <div>
+                  <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">Digital Native</div>
+                  <span className="font-serif text-sm font-medium text-gray-600">Not directly digitized from a physical holding.</span>
+                </div>
+              </div>
+            ) : physicalSources.map(item => (
+              <EdgeRow 
+                key={item.edge.id} 
+                edge={item.edge} 
+                node={item.node} 
+                isSource={item.isSource} 
+                predDef={allPredicates.find(p => p.id === item.edge.predicateId) || { forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} 
+                currentTab={currentTab} 
+                activeNodeId={activeNode.id} 
+                activeKinds={activeKinds} 
+                hideEdit={true}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 3. MEDIA VIEWER (Media Instances Only) */}
+      {isMedia && (
         <div className="bg-white border border-gray-200 rounded-xl p-2 shadow-sm mb-6">
           {hasFile ? (
             <div className="rounded bg-gray-100 overflow-hidden flex items-center justify-center min-h-[300px]">
@@ -354,110 +343,94 @@ export default async function Home({
         </div>
       )}
 
-      {/* 4. INTRINSIC PROPERTIES */}
+      {/* 4. INTRINSIC PROPERTIES (All Layers) */}
       <PropertiesEditor 
         nodeId={activeNode.id} layer={activeNode.layer as "IDENTITY" | "INSTANCE"}
         kind={activeNode.kind} initialProps={nodeProps} allNodes={allNodes}
         notEarlierThan={activeNode.notEarlierThan} notLaterThan={activeNode.notLaterThan}
       />
 
-      {/* 5. PHYSICAL HOLDINGS (Identities Only) */}
-      {isIdentity && physicalHoldings.length === 0 ? (
-        <section className="mb-8 bg-white px-5 py-3 border border-gray-200 rounded-xl shadow-sm flex flex-wrap items-center justify-between gap-4 transition-all">
-          <h2 className="text-sm font-bold text-gray-400 flex items-center gap-2">
-            <span>📦</span> Physical Holdings <span className="font-normal text-xs">(0)</span>
-          </h2>
-          <PhysicalHoldingBuilder identityId={activeNode.id} identityLabel={activeNode.label} />
-        </section>
-      ) : isIdentity && (
+      {/* 5. PHYSICAL HOLDINGS BLOCK (Identities Only) */}
+      {isIdentity && (
         <section className="mb-8 bg-white p-6 border border-gray-200 rounded-xl shadow-sm">
-          <div className="flex items-center justify-between border-b border-gray-100 pb-3 mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-100 pb-3 mb-4">
             <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
               <span>📦</span> Physical Holdings <span className="text-gray-500 font-normal text-xs">({physicalHoldings.length})</span>
             </h2>
-            <PhysicalHoldingBuilder identityId={activeNode.id} identityLabel={activeNode.label} />
+            <StructuralBuilder sourceNodeId={activeNode.id} targetType="PHYSICAL" direction="REVERSE" allNodes={allNodes as any} activeKinds={activeKinds} />
           </div>
           <div className="space-y-2">
-            {physicalHoldings.map(item => renderPhysicalHoldingRow(item))}
+            {physicalHoldings.length === 0 ? (
+               <p className="text-xs text-gray-400 italic p-4 border border-dashed border-gray-200 rounded-lg text-center bg-gray-50">No physical holdings mapped.</p>
+            ) : physicalHoldings.map(item => (
+               <EdgeRow 
+                 key={item.edge.id} 
+                 edge={item.edge} 
+                 node={item.node} 
+                 isSource={item.isSource} 
+                 predDef={allPredicates.find(p => p.id === item.edge.predicateId) || { forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} 
+                 currentTab={currentTab} 
+                 activeNodeId={activeNode.id} 
+                 activeKinds={activeKinds} 
+                 hideEdit={true}
+               />
+            ))}
           </div>
         </section>
       )}
 
-      {/* 6. SEMANTIC CONNECTIONS (Identities Only) */}
-      {isIdentity && (
-        <section className="mb-10 bg-white p-6 border border-gray-200 rounded-xl shadow-sm">
-          <h2 className="text-sm font-bold text-gray-900 border-b border-gray-100 pb-3 mb-4 flex items-center gap-2">
-            <span>🔗</span> Semantic Connections
-          </h2>
-          <div className="space-y-2 mb-4">
-            {semanticEdges.length === 0 ? (
-              <p className="text-xs text-gray-400 italic p-4 border border-dashed border-gray-200 rounded-lg text-center bg-gray-50">No semantic tags or relationships asserted.</p>
-            ) : semanticEdges.map(item => (
-              <EdgeRow 
-                key={item.edge.id} 
-                edge={item.edge} 
-                node={item.node} 
-                isSource={item.isSource} 
-                predDef={allPredicates.find(p => p.id === item.edge.predicateId) || { forwardLabel: 'UNKNOWN', reverseLabel: 'UNKNOWN', isSystem: false }} 
-                currentTab={currentTab} 
-                activeNodeId={activeNode.id} 
-                activeKinds={activeKinds} 
-                hideBadge={false} 
-              />
-            ))}
-          </div>
-          <RelationBuilder 
-            sourceNodeId={activeNode.id} sourceLayer="IDENTITY" 
-            sourceKind={activeNode.kind} allNodes={allNodes as any} allPredicates={allPredicates} activeKinds={activeKinds}
-          />
-        </section>
-      )}
+      {/* 6. CONCEPTUAL SEMANTICS BLOCK (All Layers) */}
+      <section className="mb-10 bg-white p-6 border border-gray-200 rounded-xl shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-100 pb-3 mb-4">
+           <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+             <span>{isMedia ? '📍' : '🔗'}</span> {isMedia ? 'Identified Subjects & Semantics' : 'Conceptual Semantics'}
+           </h2>
+           <RelationBuilder 
+             sourceNodeId={activeNode.id} sourceLayer={activeNode.layer as "IDENTITY" | "INSTANCE"} 
+             sourceKind={activeNode.kind} allNodes={allNodes as any} allPredicates={allPredicates} activeKinds={activeKinds}
+           />
+        </div>
+        <div className="space-y-2">
+          {conceptualSemantics.length === 0 ? (
+            <p className="text-xs text-gray-400 italic p-4 border border-dashed border-gray-200 rounded-lg text-center bg-gray-50">No semantic relationships asserted.</p>
+          ) : conceptualSemantics.map(item => (
+            <EdgeRow 
+              key={item.edge.id} 
+              edge={item.edge} 
+              node={item.node} 
+              isSource={item.isSource} 
+              predDef={allPredicates.find(p => p.id === item.edge.predicateId) || { forwardLabel: 'UNKNOWN', reverseLabel: 'UNKNOWN', isSystem: false }} 
+              currentTab={currentTab} 
+              activeNodeId={activeNode.id} 
+              activeKinds={activeKinds} 
+              hideBadge={false} 
+            />
+          ))}
+        </div>
+      </section>
 
       {/* 7. STRUCTURAL PAYLOAD (The Tabs) */}
       <section>
-        {/* IDENTITY TABS */}
-        {isIdentity && (
-          <div className="flex gap-6 border-b border-gray-200 mb-6 overflow-x-auto no-scrollbar">
-            <a href={`/?node=${activeNode.id}&tab=digital`} className={`pb-2 text-sm font-bold whitespace-nowrap transition-colors ${currentTab === 'digital' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-800'}`}>
-              🖼️ Digital Embodiments <span className="ml-1 opacity-60 font-normal">({digitalArtifacts.length})</span>
-            </a>
-            <a href={`/?node=${activeNode.id}&tab=appearances`} className={`pb-2 text-sm font-bold whitespace-nowrap transition-colors ${currentTab === 'appearances' ? 'border-b-2 border-emerald-600 text-emerald-600' : 'text-gray-500 hover:text-gray-800'}`}>
-              📍 Media Appearances <span className="ml-1 opacity-60 font-normal">({mediaAppearances.length})</span>
-            </a>
-            <a href={`/?node=${activeNode.id}&tab=collection`} className={`pb-2 text-sm font-bold whitespace-nowrap transition-colors ${currentTab === 'collection' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-800'}`}>
-              🗂️ Curated Collection <span className="ml-1 opacity-60 font-normal">({structuralCollections.length})</span>
-            </a>
-          </div>
-        )}
-
-        {/* INSTANCE TABS */}
-        {!isIdentity && (
-          <div className="flex gap-6 border-b border-gray-200 mb-6 overflow-x-auto no-scrollbar">
-            {isMedia && (
-              <a href={`/?node=${activeNode.id}&tab=subjects`} className={`pb-2 text-sm font-bold whitespace-nowrap transition-colors ${currentTab === 'subjects' ? 'border-b-2 border-emerald-600 text-emerald-600' : 'text-gray-500 hover:text-gray-800'}`}>
-                📍 Identified Subjects <span className="ml-1 opacity-60 font-normal">({identifiedSubjects.length})</span>
+        
+        {/* TABS NAVIGATION */}
+        <div className="flex gap-6 border-b border-gray-200 mb-6 overflow-x-auto no-scrollbar">
+          {(isIdentity || isPhysical) && (
+            <>
+              <a href={`/?node=${activeNode.id}&tab=digital`} className={`pb-2 text-sm font-bold whitespace-nowrap transition-colors ${currentTab === 'digital' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-800'}`}>
+                🖼️ Digital Embodiments <span className="ml-1 opacity-60 font-normal">({digitalArtifacts.length})</span>
               </a>
-            )}
-            {isPhysical && (
               <a href={`/?node=${activeNode.id}&tab=appearances`} className={`pb-2 text-sm font-bold whitespace-nowrap transition-colors ${currentTab === 'appearances' ? 'border-b-2 border-emerald-600 text-emerald-600' : 'text-gray-500 hover:text-gray-800'}`}>
                 📸 Media Appearances <span className="ml-1 opacity-60 font-normal">({mediaAppearances.length})</span>
               </a>
-            )}
-            {activeNode.kind === 'PHYSICAL_CONTAINER' && (
-              <a href={`/?node=${activeNode.id}&tab=contents`} className={`pb-2 text-sm font-bold whitespace-nowrap transition-colors ${currentTab === 'contents' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-800'}`}>
-                📥 Contents <span className="ml-1 opacity-60 font-normal">({containerContents.length})</span>
-              </a>
-            )}
-            <a href={`/?node=${activeNode.id}&tab=semantic`} className={`pb-2 text-sm font-bold whitespace-nowrap transition-colors ${currentTab === 'semantic' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-800'}`}>
-              🔗 Semantic Connections <span className="ml-1 opacity-60 font-normal">({semanticEdges.length})</span>
-            </a>
-          </div>
-        )}
+            </>
+          )}
+          <a href={`/?node=${activeNode.id}&tab=collections`} className={`pb-2 text-sm font-bold whitespace-nowrap transition-colors ${currentTab === 'collections' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-800'}`}>
+            🗂️ Collections & Contents <span className="ml-1 opacity-60 font-normal">({containedIn.length + containsItems.length})</span>
+          </a>
+        </div>
 
-        {/* ========================================================================= */}
-        {/* IDENTITY TAB CONTENTS                                                     */}
-        {/* ========================================================================= */}
-        {isIdentity && currentTab === 'digital' && (
+        {/* TAB CONTENTS */}
+        {(isIdentity || isPhysical) && currentTab === 'digital' && (
           <div className="animate-in fade-in">
             <div className="flex justify-end mb-3">
               <MediaUploader identityId={activeNode.id} asButton={true} physicalHoldings={physicalHoldingOptions} />
@@ -473,7 +446,8 @@ export default async function Home({
                   currentTab={currentTab} 
                   activeNodeId={activeNode.id} 
                   activeKinds={activeKinds} 
-                  hideBadge={true} 
+                  hideBadge={true}
+                  hideEdit={true}
                 />
               ))}
             </div>
@@ -483,142 +457,18 @@ export default async function Home({
         {(isIdentity || isPhysical) && currentTab === 'appearances' && (
           <div className="animate-in fade-in">
             <div className="flex justify-end mb-3">
-              <MediaReferenceBuilder 
-                sourceNodeId={activeNode.id} 
-                sourceLayer={activeNode.layer as "IDENTITY" | "INSTANCE"} 
-                sourceKind={activeNode.kind}
-                allNodes={allNodes as any} 
-                activeKinds={activeKinds} 
-              />
-            </div>
-            <div className="space-y-2">
-              {mediaAppearances.length === 0 ? <p className="text-xs text-gray-400 italic p-4 border border-dashed border-gray-200 rounded-lg text-center bg-gray-50">No media appearances logged.</p> : mediaAppearances.map(item => (
-                <ReferenceRow 
-                  key={item.edge.id} 
-                  edge={item.edge} 
-                  node={item.node} 
-                  isSource={item.isSource} 
-                  currentTab={currentTab} 
-                  activeNodeId={activeNode.id} 
-                  activeKinds={activeKinds} 
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {isIdentity && currentTab === 'collection' && (
-          <div className="animate-in fade-in">
-            <div className="flex justify-end mb-3">
-               <ContainmentBuilder sourceNodeId={activeNode.id} sourceLayer="IDENTITY" allNodes={allNodes as any} activeKinds={activeKinds} />
-            </div>
-            <div className="space-y-2">
-              {structuralCollections.length === 0 ? <p className="text-xs text-gray-400 italic p-4 border border-dashed border-gray-200 rounded-lg text-center bg-gray-50">This concept does not contain any sub-items.</p> : structuralCollections.map(item => (
-                <EdgeRow 
-                  key={item.edge.id} 
-                  edge={item.edge} 
-                  node={item.node} 
-                  isSource={item.isSource} 
-                  predDef={allPredicates.find(p => p.id === item.edge.predicateId) || { forwardLabel: 'UNKNOWN', reverseLabel: 'UNKNOWN', isSystem: false }} 
-                  currentTab={currentTab} 
-                  activeNodeId={activeNode.id} 
-                  activeKinds={activeKinds} 
-                  hideBadge={true} 
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* INSTANCE TAB CONTENTS                                                     */}
-        {/* ========================================================================= */}
-        {!isIdentity && isMedia && currentTab === 'subjects' && (
-          <div className="animate-in fade-in">
-            <div className="flex justify-end mb-3">
-               <MediaReferenceBuilder 
-                sourceNodeId={activeNode.id} 
-                sourceLayer="INSTANCE" 
-                sourceKind={activeNode.kind}
-                allNodes={allNodes as any} 
-                activeKinds={activeKinds} 
-              />
-            </div>
-            <div className="space-y-2">
-              {identifiedSubjects.length === 0 ? <p className="text-xs text-gray-400 italic p-4 border border-dashed border-gray-200 rounded-lg text-center bg-gray-50">No subjects tagged in this media.</p> : identifiedSubjects.map(item => (
-                <ReferenceRow 
-                  key={item.edge.id} 
-                  edge={item.edge} 
-                  node={item.node} 
-                  isSource={item.isSource} 
-                  currentTab={currentTab} 
-                  activeNodeId={activeNode.id} 
-                  activeKinds={activeKinds} 
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {!isIdentity && currentTab === 'appearances' && (
-          <div className="animate-in fade-in">
-            <div className="space-y-2">
-              {mediaAppearances.length === 0 ? (
-                <div className="text-center p-4 border border-dashed border-gray-200 rounded-lg bg-gray-50">
-                  <p className="text-xs text-gray-400 italic mb-2">This physical artifact hasn't been tagged in any other media.</p>
-                  <p className="text-[10px] text-gray-400 font-medium">To log an appearance, open a Photo or Video and tag this item as a subject!</p>
-                </div>
-              ) : mediaAppearances.map(item => (
-                <ReferenceRow 
-                  key={item.edge.id} 
-                  edge={item.edge} 
-                  node={item.node} 
-                  isSource={item.isSource} 
-                  currentTab={currentTab} 
-                  activeNodeId={activeNode.id} 
-                  activeKinds={activeKinds} 
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {!isIdentity && currentTab === 'contents' && activeNode.kind === 'PHYSICAL_CONTAINER' && (
-          <div className="animate-in fade-in">
-            <div className="flex justify-end mb-3">
-               <ContainmentBuilder sourceNodeId={activeNode.id} sourceLayer="INSTANCE" allNodes={allNodes as any} activeKinds={activeKinds} />
-            </div>
-            <div className="space-y-2">
-              {containerContents.length === 0 ? <p className="text-xs text-gray-400 italic p-4 border border-dashed border-gray-200 rounded-lg text-center bg-gray-50">This container is empty.</p> : containerContents.map(item => (
-                <EdgeRow 
-                  key={item.edge.id} 
-                  edge={item.edge} 
-                  node={item.node} 
-                  isSource={item.isSource} 
-                  predDef={allPredicates.find(p => p.id === item.edge.predicateId) || { forwardLabel: 'UNKNOWN', reverseLabel: 'UNKNOWN', isSystem: false }} 
-                  currentTab={currentTab} 
-                  activeNodeId={activeNode.id} 
-                  activeKinds={activeKinds} 
-                  hideBadge={true} 
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* SHARED TAB CONTENTS (Semantic Connections - Instances Only)               */}
-        {/* ========================================================================= */}
-        {!isIdentity && currentTab === 'semantic' && (
-          <div className="animate-in fade-in">
-            <div className="flex justify-end mb-3">
-               <RelationBuilder 
+              <RelationBuilder 
                 sourceNodeId={activeNode.id} sourceLayer={activeNode.layer as "IDENTITY" | "INSTANCE"} 
                 sourceKind={activeNode.kind} allNodes={allNodes as any} allPredicates={allPredicates} activeKinds={activeKinds}
               />
             </div>
             <div className="space-y-2">
-              {semanticEdges.length === 0 ? <p className="text-xs text-gray-400 italic p-4 border border-dashed border-gray-200 rounded-lg text-center bg-gray-50">No semantic tags or relationships asserted.</p> : semanticEdges.map(item => (
+              {mediaAppearances.length === 0 ? (
+                <div className="text-center p-4 border border-dashed border-gray-200 rounded-lg bg-gray-50">
+                  <p className="text-xs text-gray-400 italic mb-2">Not currently tagged in any media.</p>
+                  <p className="text-[10px] text-gray-400 font-medium">To log an appearance, assert a semantic link to a Photo or Video!</p>
+                </div>
+              ) : mediaAppearances.map(item => (
                 <EdgeRow 
                   key={item.edge.id} 
                   edge={item.edge} 
@@ -632,6 +482,87 @@ export default async function Home({
                 />
               ))}
             </div>
+          </div>
+        )}
+
+        {currentTab === 'collections' && (
+          <div className="animate-in fade-in space-y-8">
+            
+            {/* 1. Contained In (Where does this live?) */}
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-4 mb-3 border-b border-gray-100 pb-1">
+                <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                  Contained In (Locations & Collections)
+                </h3>
+                <ContainmentBuilder 
+                    sourceNodeId={activeNode.id} 
+                    sourceLayer={activeNode.layer as "IDENTITY" | "INSTANCE"} 
+                    sourceKind={activeNode.kind}
+                    allNodes={allNodes as any} 
+                    activeKinds={activeKinds}
+                    label="Add Location"
+                    direction="CONTAINED_IN"
+                />
+              </div>
+              <div className="space-y-2">
+                {containedIn.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic p-4 border border-dashed border-gray-200 rounded-lg bg-gray-50 text-center">
+                    Not part of any collection or container.
+                  </p>
+                ) : containedIn.map(item => (
+                  <EdgeRow 
+                    key={item.edge.id} 
+                    edge={item.edge} 
+                    node={item.node} 
+                    isSource={item.isSource} 
+                    predDef={allPredicates.find(p => p.id === item.edge.predicateId) || { forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }} 
+                    currentTab={currentTab} 
+                    activeNodeId={activeNode.id} 
+                    activeKinds={activeKinds} 
+                    hideBadge={false}
+                    hideEdit={true}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* 2. Contains (What lives inside this?) - Blocked for Media */}
+            {(!isMedia) && (
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-4 mb-3 border-b border-gray-100 pb-1">
+                  <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                    Contents & Items
+                  </h3>
+                  <ContainmentBuilder 
+                    sourceNodeId={activeNode.id} 
+                    sourceLayer={activeNode.layer as "IDENTITY" | "INSTANCE"} 
+                    sourceKind={activeNode.kind}
+                    allNodes={allNodes as any} 
+                    activeKinds={activeKinds} 
+                  />
+                </div>
+                <div className="space-y-2">
+                  {containsItems.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic p-4 border border-dashed border-gray-200 rounded-lg bg-gray-50 text-center">
+                      No contents mapped inside this record.
+                    </p>
+                  ) : containsItems.map(item => (
+                    <EdgeRow 
+                      key={item.edge.id} 
+                      edge={item.edge} 
+                      node={item.node} 
+                      isSource={item.isSource} 
+                      predDef={allPredicates.find(p => p.id === item.edge.predicateId) || { forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }} 
+                      currentTab={currentTab} 
+                      activeNodeId={activeNode.id} 
+                      activeKinds={activeKinds} 
+                      hideBadge={false}
+                      hideEdit={true} 
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

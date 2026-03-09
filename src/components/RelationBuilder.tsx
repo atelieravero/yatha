@@ -53,7 +53,31 @@ export default function RelationBuilder({
   
   // Edge Properties
   const [temporalInput, setTemporalInput] = useState("");
+  const [locator, setLocator] = useState("");
   const [liveBounds, setLiveBounds] = useState<{start?: Date, end?: Date}>({});
+
+  // --------------------------------------------------------------------------
+  // 3-LAYER ONTOLOGY CLASSIFICATION
+  // --------------------------------------------------------------------------
+  const isSourceIdentity = sourceLayer === 'IDENTITY';
+  const isSourcePhysical = sourceLayer === 'INSTANCE' && (sourceKind === 'PHYSICAL_OBJECT' || sourceKind === 'PHYSICAL_CONTAINER');
+  const isSourceMedia = sourceLayer === 'INSTANCE' && !isSourcePhysical;
+
+  // SMART DEFAULTS: Auto-select verb to reduce click fatigue for Media Tagging
+  useEffect(() => {
+    if (isOpen && !selectedConnection && isSourceMedia) {
+      let defaultVerb = "";
+      if (sourceKind === 'IMAGE' || sourceKind === 'VIDEO' || sourceKind === 'YOUTUBE_VIDEO') defaultVerb = 'depicts';
+      else if (sourceKind === 'AUDIO' || sourceKind === 'DOCUMENT' || sourceKind === 'WEB_LINK') defaultVerb = 'mentions';
+
+      if (defaultVerb) {
+        const pred = allPredicates.find(p => p.forwardLabel.toLowerCase() === defaultVerb && !p.isSystem);
+        if (pred) {
+          setSelectedConnection(`${pred.id}_FORWARD`);
+        }
+      }
+    }
+  }, [isOpen, sourceKind, allPredicates, selectedConnection, isSourceMedia]);
 
   // Sync live bounds when the user types a temporal bound
   useEffect(() => {
@@ -68,6 +92,7 @@ export default function RelationBuilder({
     setTargetId("");
     setTargetSearch("");
     setTemporalInput("");
+    setLocator("");
     setIsOpen(false);
     setIsCreatingPredicate(false);
     setIsMintingInline(false);
@@ -77,10 +102,25 @@ export default function RelationBuilder({
   const selectedPredId = selectedConnection.split('_')[0];
   const selectedDirection = selectedConnection.split('_')[1];
 
-  const availableTargets = allNodes.filter(n => n.id !== sourceNodeId);
+  // --------------------------------------------------------------------------
+  // THE STRICT EDGE MATRIX FILTER
+  // --------------------------------------------------------------------------
+  const allowedTargets = allNodes.filter(n => {
+    if (n.id === sourceNodeId) return false;
+    
+    const isTargetPhysical = n.layer === 'INSTANCE' && (n.kind === 'PHYSICAL_OBJECT' || n.kind === 'PHYSICAL_CONTAINER');
+    const isTargetMedia = n.layer === 'INSTANCE' && !isTargetPhysical;
+
+    // RULE: Pure semantic links are banned between peers of the same Instance layer to prevent graph hairballs.
+    if (isSourcePhysical && isTargetPhysical) return false; // Use CONTAINS or DERIVED_FROM instead
+    if (isSourceMedia && isTargetMedia) return false;       // Use CONTAINS or DERIVED_FROM instead
+    
+    return true;
+  });
+
   const filteredTargets = targetSearch.trim() === "" 
     ? [] 
-    : availableTargets.filter(n => 
+    : allowedTargets.filter(n => 
         n.label.toLowerCase().includes(targetSearch.toLowerCase()) ||
         (n.aliases && n.aliases.some(alias => alias.toLowerCase().includes(targetSearch.toLowerCase())))
       ).slice(0, 10);
@@ -107,7 +147,9 @@ export default function RelationBuilder({
     if (!selectedConnection) return;
 
     startTransition(async () => {
-      // 1. Handle Inline Identity Minting
+      const edgeProperties = locator.trim() ? { locator: locator.trim() } : {};
+
+      // 1. Handle Inline Identity Minting (Track 1 integration)
       if (isMintingInline) {
         await createAndLinkIdentity(
           targetSearch.trim(), 
@@ -116,6 +158,8 @@ export default function RelationBuilder({
           selectedPredId, 
           selectedDirection === "REVERSE"
         );
+        // Note: Edge properties like locators are intentionally dropped during quick inline minting to keep the action fast.
+        // Users can edit the edge immediately after creation to append exact locators.
       } 
       // 2. Handle Standard Edge Assertion
       else if (targetId) {
@@ -125,7 +169,7 @@ export default function RelationBuilder({
 
         await assertEdge(
           finalSource, finalTarget, selectedPredId, "SEMANTIC", 
-          temporalInput, null, 999 
+          temporalInput || null, null, 999, edgeProperties 
         );
       }
 
@@ -135,24 +179,31 @@ export default function RelationBuilder({
       setIsMintingInline(false);
       setSelectedConnection("");
       setTemporalInput("");
+      setLocator("");
     });
   };
 
+  // Contextual UI Text
+  const buttonLabel = isSourceMedia ? "Tag Subject" : "Assert Semantic Link";
+  const modalTitle = isSourceMedia ? "📍 Tag Subject & Semantics" : "🔗 Assert Semantic Link";
+  const buttonColor = isSourceMedia ? "text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100" : "text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100";
+  const modalTheme = isSourceMedia ? "border-emerald-200 bg-emerald-50/30" : "border-blue-200 bg-blue-50/30";
+
   if (!isOpen) {
     return (
-      <button onClick={() => setIsOpen(true)} className="mt-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded transition-colors cursor-pointer shadow-sm">
-        <span className="text-sm leading-none">+</span> Assert Semantic Link
+      <button onClick={() => setIsOpen(true)} className={`mt-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest px-3 py-1.5 rounded transition-colors cursor-pointer shadow-sm ${buttonColor}`}>
+        + {buttonLabel}
       </button>
     );
   }
 
   return (
-    <div className="mt-2 p-4 border border-blue-200 bg-blue-50/50 rounded-lg shadow-sm animate-in fade-in slide-in-from-top-2">
+    <div className={`mt-2 p-4 border rounded-lg shadow-sm animate-in fade-in slide-in-from-top-2 ${modalTheme}`}>
       
       {/* PREDICATE CREATION FLOW */}
       {isCreatingPredicate ? (
         <div className="flex flex-col gap-3 text-sm animate-in fade-in">
-          <div className="font-medium text-gray-700 mb-1 flex justify-between items-center border-b border-blue-100 pb-2">
+          <div className="font-medium text-gray-700 mb-1 flex justify-between items-center border-b border-gray-200 pb-2">
             <span>✨ Define New Semantic Pair</span>
             <button onClick={() => setIsCreatingPredicate(false)} className="text-gray-400 hover:text-gray-600 px-2 cursor-pointer">✕</button>
           </div>
@@ -210,7 +261,13 @@ export default function RelationBuilder({
       ) : (
         /* 1. PREDICATE SELECTOR */
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 text-sm mb-3">
-          <span className="font-medium text-gray-700 whitespace-nowrap">This node</span>
+          <div className="flex items-center justify-between w-full sm:w-auto">
+            <span className="font-bold text-gray-900 whitespace-nowrap flex items-center gap-2">
+              {modalTitle.split(' ')[0]} {isSourceMedia ? 'This media' : 'This node'}
+            </span>
+            <button onClick={() => setIsOpen(false)} className="text-gray-400 hover:text-gray-600 px-2 cursor-pointer sm:hidden">✕</button>
+          </div>
+          
           <select
             value={selectedConnection}
             onChange={(e) => {
@@ -218,9 +275,9 @@ export default function RelationBuilder({
               else { setSelectedConnection(e.target.value); setIsCreatingPredicate(false); }
             }}
             disabled={isPending}
-            className="p-2 border border-gray-200 text-gray-900 rounded-md bg-white focus:outline-none focus:ring-2 w-full sm:w-auto font-medium focus:ring-blue-500"
+            className="p-2 border border-gray-200 text-gray-900 rounded-md bg-white focus:outline-none focus:ring-2 w-full sm:w-auto font-medium focus:ring-blue-500 shadow-sm"
           >
-            <option value="">Select connection...</option>
+            <option value="">Select connection verb...</option>
             <optgroup label="Semantic Vocabulary">
               {allPredicates
                 .filter(p => p.isActive && !p.isSystem)
@@ -244,7 +301,7 @@ export default function RelationBuilder({
 
       {/* 2. TARGET SELECTOR & PROPERTIES */}
       {!isCreatingPredicate && selectedConnection && (
-        <div className="mb-3 pl-0 sm:pl-[70px] animate-in fade-in relative">
+        <div className="mb-3 pl-0 sm:pl-[120px] animate-in fade-in relative">
            
            {/* TARGET SELECTOR */}
            {!isMintingInline && !targetId ? (
@@ -254,6 +311,7 @@ export default function RelationBuilder({
                   placeholder="Type to search for target node..." 
                   value={targetSearch}
                   onChange={(e) => { setTargetSearch(e.target.value); setTargetId(""); }}
+                  autoFocus
                   className="w-full p-2 border border-gray-200 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
                 />
                 
@@ -284,7 +342,7 @@ export default function RelationBuilder({
                       onClick={() => setIsMintingInline(true)}
                       className="p-2 text-sm text-blue-600 font-bold bg-blue-50/50 hover:bg-blue-100 cursor-pointer border-t border-blue-100 flex items-center gap-2"
                     >
-                      <span>✨</span> + Create "{targetSearch}" as new Identity...
+                      <span>✨</span> + Create "{targetSearch}" as new Concept/Identity...
                     </div>
                   </div>
                 )}
@@ -312,30 +370,45 @@ export default function RelationBuilder({
              </div>
            )}
 
-           {/* TEMPORAL BOUNDS (Always visible once connected is picked) */}
+           {/* PROPERTIES (Temporal & Locator) */}
            {(targetId || isMintingInline) && (
-             <div className="p-3 bg-gray-50 border border-gray-200 rounded-md animate-in fade-in slide-in-from-top-1">
-                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Temporal Bounds (Optional)</label>
-                <input
-                  type="text"
-                  placeholder="e.g. 1995~1998"
-                  value={temporalInput}
-                  onChange={(e) => setTemporalInput(e.target.value)}
-                  disabled={isPending}
-                  className="p-1.5 text-xs border border-gray-200 rounded bg-white w-full sm:max-w-xs focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
-                />
-                {(temporalInput || liveBounds.start || liveBounds.end) && (
-                  <div className="mt-2 bg-emerald-50/50 border border-emerald-100 p-2 rounded-md w-fit">
-                    <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-widest block mb-0.5">
-                      ↳ System Boundaries:
-                    </span>
-                    <div className="font-mono text-[10px] text-emerald-900 flex items-center gap-2">
-                      <span>{liveBounds.start ? liveBounds.start.toISOString().split('T')[0] : 'Open'}</span>
-                      <span className="text-gray-400">→</span>
-                      <span>{liveBounds.end ? liveBounds.end.toISOString().split('T')[0] : 'Open'}</span>
+             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3 bg-gray-50 border border-gray-200 rounded-md animate-in fade-in slide-in-from-top-1">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Locator / Position (Optional)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Top-left, Page 42, 01:24"
+                    value={locator}
+                    onChange={(e) => setLocator(e.target.value)}
+                    disabled={isPending}
+                    className="p-1.5 text-xs border border-gray-200 rounded bg-white w-full focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1.5 font-medium leading-tight">Specify where exactly this interaction or subject appears.</p>
+                </div>
+                
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Temporal Bounds (Optional)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 1995~1998"
+                    value={temporalInput}
+                    onChange={(e) => setTemporalInput(e.target.value)}
+                    disabled={isPending}
+                    className="p-1.5 text-xs border border-gray-200 rounded bg-white w-full focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                  />
+                  {(temporalInput || liveBounds.start || liveBounds.end) && (
+                    <div className="mt-2 bg-emerald-50/50 border border-emerald-100 p-2 rounded-md w-fit">
+                      <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-widest block mb-0.5">
+                        ↳ System Boundaries:
+                      </span>
+                      <div className="font-mono text-[10px] text-emerald-900 flex items-center gap-2">
+                        <span>{liveBounds.start ? liveBounds.start.toISOString().split('T')[0] : 'Open'}</span>
+                        <span className="text-gray-400">→</span>
+                        <span>{liveBounds.end ? liveBounds.end.toISOString().split('T')[0] : 'Open'}</span>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
              </div>
            )}
         </div>
@@ -343,14 +416,14 @@ export default function RelationBuilder({
 
       {/* 3. ACTIONS */}
       {!isCreatingPredicate && selectedConnection && (
-        <div className="flex justify-end gap-2 pt-3 border-t border-blue-100">
-          <button onClick={() => setIsOpen(false)} disabled={isPending} className="px-4 py-2 text-gray-500 text-xs font-medium hover:text-gray-800 cursor-pointer">
+        <div className="flex justify-end gap-2 pt-3 border-t border-gray-200 mt-2">
+          <button onClick={() => setIsOpen(false)} disabled={isPending} className="px-4 py-2 text-gray-500 text-xs font-medium hover:text-gray-800 cursor-pointer hidden sm:block">
             Cancel
           </button>
           <button
             onClick={handleAssert}
             disabled={!selectedConnection || (!targetId && (!isMintingInline || !inlineKind)) || isPending}
-            className="px-5 py-2 bg-gray-900 text-white text-xs font-bold uppercase tracking-widest rounded hover:bg-gray-800 disabled:opacity-50 transition-colors shadow-sm cursor-pointer"
+            className="px-5 py-2 bg-gray-900 text-white text-xs font-bold uppercase tracking-widest rounded hover:bg-gray-800 disabled:opacity-50 transition-colors shadow-sm cursor-pointer w-full sm:w-auto"
           >
             {isPending ? "Saving..." : "Assert Link"}
           </button>
