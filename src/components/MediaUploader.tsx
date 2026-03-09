@@ -6,12 +6,10 @@ import { getUploadTicket, attachFileToNode, createDigitalArtifact, checkDuplicat
 export default function MediaUploader({ 
   nodeId, 
   identityId,
-  physicalHoldings = [],
   asButton = false
 }: { 
   nodeId?: string; 
   identityId?: string;
-  physicalHoldings?: { id: string, label: string }[];
   asButton?: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -27,17 +25,15 @@ export default function MediaUploader({
   
   // Confirmation State
   const [label, setLabel] = useState("");
-  const [isDerived, setIsDerived] = useState(false);
-  const [derivedFromId, setDerivedFromId] = useState("");
   
-  const [duplicateFound, setDuplicateFound] = useState<{id: string, label: string, kind: string} | null>(null);
+  const [duplicateFound, setDuplicateFound] = useState<{id: string, label: string, layer: string} | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   // --------------------------------------------------------------------------
   // 3-MODE ROUTING LOGIC
   // --------------------------------------------------------------------------
   let mode: 'CONTEXTUAL' | 'DIRECT_ATTACH' | 'GLOBAL' = 'GLOBAL';
-  if (identityId) mode = 'CONTEXTUAL';     // Added from a Concept or Physical Item tab
+  if (identityId) mode = 'CONTEXTUAL';     // Added from an Identity tab
   else if (nodeId) mode = 'DIRECT_ATTACH'; // Uploading to an empty, existing Media Node
 
   const handleClose = () => {
@@ -50,8 +46,6 @@ export default function MediaUploader({
     setIsDragging(false);
     setLabel("");
     setPayload(null);
-    setIsDerived(false);
-    setDerivedFromId("");
   };
 
   // --- Step 1: Input & Analysis (FILE) ---
@@ -149,10 +143,12 @@ export default function MediaUploader({
       setStatus("Asserting to knowledge graph...");
 
       if (mode === "CONTEXTUAL" && identityId) {
+        // Lineage is dead! We just pass the 4 core arguments.
         await createDigitalArtifact(
-          identityId, label.trim(), payload.kind, 
-          { fileUrl: finalFileUrl, mimeType: payload.mimeType, fileSize: payload.fileSize, hash: payload.hash },
-          isDerived ? derivedFromId : undefined
+          identityId, 
+          label.trim(), 
+          payload.kind, 
+          { fileUrl: finalFileUrl, mimeType: payload.mimeType, fileSize: payload.fileSize, hash: payload.hash }
         );
         handleClose();
         if (typeof window !== 'undefined') window.location.reload();
@@ -164,9 +160,9 @@ export default function MediaUploader({
         if (typeof window !== 'undefined') window.location.reload();
       }
       else {
-        // GLOBAL UPLOAD (Mint a new orphaned node and go to it)
+        // GLOBAL UPLOAD (Mint a new orphaned node on the MEDIA layer)
         const actualUrl = tab === 'LINK' ? linkUrl.trim() : finalFileUrl;
-        const newId = await createNode(label.trim(), "INSTANCE", payload.kind);
+        const newId = await createNode(label.trim(), "MEDIA", null);
         await attachFileToNode(newId, actualUrl, payload.mimeType, payload.fileSize, payload.hash);
         handleClose();
         if (typeof window !== 'undefined') window.location.href = `/?node=${newId}`;
@@ -298,21 +294,6 @@ export default function MediaUploader({
                 onChange={e => setLabel(e.target.value)} 
                 className="w-full p-2 text-sm border border-gray-200 rounded font-medium text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
               />
-            </div>
-          )}
-
-          {mode === 'CONTEXTUAL' && physicalHoldings.length > 0 && tab === 'FILE' && (
-            <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
-              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 cursor-pointer mb-2">
-                <input type="checkbox" checked={isDerived} onChange={(e) => setIsDerived(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-                Digitized from a physical holding?
-              </label>
-              {isDerived && (
-                <select value={derivedFromId} onChange={(e) => setDerivedFromId(e.target.value)} className="w-full p-2 text-xs border border-blue-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50/30">
-                  <option value="">Select source material...</option>
-                  {physicalHoldings.map(h => <option key={h.id} value={h.id}>{h.label}</option>)}
-                </select>
-              )}
             </div>
           )}
 

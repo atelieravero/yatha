@@ -39,14 +39,11 @@ export async function searchGraphNodes(query: string) {
 
 async function captureNodeSnapshot(nodeId: string, userId: string = "system_user") {
   const [currentNode] = await db.select().from(nodes).where(eq(nodes.id, nodeId));
-  
-  if (!currentNode) {
-    throw new Error("Node not found");
-  }
+  if (!currentNode) throw new Error("Node not found");
 
   await db.insert(nodeHistory).values({
     nodeId: currentNode.id,
-    previousKind: currentNode.kind,
+    previousKind: currentNode.kind, // Safely handles null for Physical/Media
     previousLabel: currentNode.label,
     previousAliases: currentNode.aliases || [],
     previousTemporalInput: currentNode.temporalInput,
@@ -70,7 +67,6 @@ export async function restoreNodeSnapshot(nodeId: string, snapshotId: string) {
   if (!snapshot) throw new Error("Snapshot not found");
 
   await captureNodeSnapshot(nodeId, "system_user_restored");
-
   const bounds = parseFuzzyTemporal(snapshot.previousTemporalInput);
 
   await db.update(nodes)
@@ -91,7 +87,7 @@ export async function restoreNodeSnapshot(nodeId: string, snapshotId: string) {
 }
 
 // ============================================================================
-// TAXONOMY MANAGEMENT (KINDS & PREDICATES)
+// TAXONOMY MANAGEMENT
 // ============================================================================
 
 export async function getAllKinds() {
@@ -99,12 +95,21 @@ export async function getAllKinds() {
 }
 
 export async function createKind(label: string, icon: string) {
-  await db.insert(kinds).values({ label, icon: icon || '🟣', isActive: true });
+  await db.insert(kinds).values({
+    label,
+    icon: icon || '🟣',
+    isActive: true,
+  });
   revalidatePath('/');
 }
 
 export async function updateKind(id: string, label: string, icon: string) {
-  await db.update(kinds).set({ label, icon: icon || '🟣' }).where(eq(kinds.id, id));
+  await db.update(kinds)
+    .set({ 
+      label, 
+      icon: icon || '🟣' 
+    })
+    .where(eq(kinds.id, id));
   revalidatePath('/');
 }
 
@@ -119,7 +124,11 @@ export async function deactivateAndMigrateKind(oldKindId: string, newKindId: str
 
   if (affectedNodes.length > 0) {
     await db.update(nodes)
-      .set({ kind: newKindId, updatedAt: new Date(), updatedBy: "system_admin_migration" })
+      .set({ 
+        kind: newKindId, 
+        updatedAt: new Date(),
+        updatedBy: "system_admin_migration"
+      })
       .where(eq(nodes.kind, oldKindId));
   }
 
@@ -134,7 +143,6 @@ export async function getAllPredicates() {
 export async function seedSystemPredicates() {
   const systemPreds = [
     { id: SYSTEM_PREDICATES.CARRIES, forwardLabel: 'CARRIES', reverseLabel: 'instantiated in', isSymmetric: false, isSystem: true, isActive: true },
-    { id: SYSTEM_PREDICATES.DERIVED_FROM, forwardLabel: 'DERIVED FROM', reverseLabel: 'source of', isSymmetric: false, isSystem: true, isActive: true },
     { id: SYSTEM_PREDICATES.CONTAINS, forwardLabel: 'CONTAINS', reverseLabel: 'part of', isSymmetric: false, isSystem: true, isActive: true },
   ];
   for (const pred of systemPreds) {
@@ -144,11 +152,7 @@ export async function seedSystemPredicates() {
 
 export async function createPredicate(forwardLabel: string, reverseLabel: string, isSymmetric: boolean) {
   await db.insert(predicates).values({
-    forwardLabel,
-    reverseLabel: isSymmetric ? forwardLabel : reverseLabel,
-    isSymmetric,
-    isSystem: false,
-    isActive: true,
+    forwardLabel, reverseLabel: isSymmetric ? forwardLabel : reverseLabel, isSymmetric, isSystem: false, isActive: true,
   });
   revalidatePath('/');
 }
@@ -178,14 +182,15 @@ export async function deactivateAndMigratePredicate(oldId: string, newId: string
 }
 
 // ============================================================================
-// NODE CREATION & UPDATES
+// NODE CREATION & UPDATES (3-Layer Native)
 // ============================================================================
 
-export async function createNode(label: string, layer: "IDENTITY" | "INSTANCE", kind: string) {
+export async function createNode(label: string, layer: "IDENTITY" | "PHYSICAL" | "MEDIA", kind?: string | null, properties?: any) {
   const [newNode] = await db.insert(nodes).values({
     layer,
-    kind: kind,
+    kind: kind || null,
     label,
+    properties: properties || {},
     updatedBy: "system_user", 
   }).returning({ id: nodes.id });
 
@@ -232,16 +237,9 @@ export async function updateNodeProperties(nodeId: string, newProps: any) {
     notLaterThan = bounds.notLaterThan || null;
   }
 
-  await db.update(nodes)
-    .set({ 
-      properties: updatedProps,
-      temporalInput: temporalInput || null,
-      notEarlierThan: notEarlierThan,
-      notLaterThan: notLaterThan,
-      updatedAt: new Date() 
-    })
-    .where(eq(nodes.id, nodeId));
-  
+  await db.update(nodes).set({ 
+    properties: updatedProps, temporalInput: temporalInput || null, notEarlierThan, notLaterThan, updatedAt: new Date() 
+  }).where(eq(nodes.id, nodeId));
   revalidatePath('/');
 }
 
@@ -265,14 +263,8 @@ export async function attachFileToNode(nodeId: string, fileUrl: string, mimeType
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const updatedProps = { 
-    ...existingProps, fileUrl, mimeType, fileSize: formatBytes(fileSize), hash
-  };
-
-  await db.update(nodes)
-    .set({ properties: updatedProps, updatedAt: new Date() })
-    .where(eq(nodes.id, nodeId));
-  
+  const updatedProps = { ...existingProps, fileUrl, mimeType, fileSize: formatBytes(fileSize), hash };
+  await db.update(nodes).set({ properties: updatedProps, updatedAt: new Date() }).where(eq(nodes.id, nodeId));
   revalidatePath('/'); 
 }
 
@@ -288,7 +280,7 @@ export async function assertEdge(
   sourceId: string,
   targetId: string,
   predicateId: string, 
-  category: "SEMANTIC" | "STRUCTURAL" | "LINEAGE",
+  category: "SEMANTIC" | "STRUCTURAL" | "CONTAINMENT",
   temporalInput?: string | null,
   sortOrder?: number | null,
   properties?: Record<string, any>
@@ -307,37 +299,29 @@ export async function assertEdge(
   }
 
   await db.insert(edges).values({
-    sourceId: finalSource,
-    targetId: finalTarget,
-    predicateId,
+    sourceId: finalSource, 
+    targetId: finalTarget, 
+    predicateId, 
     category,
-    temporalInput: temporalInput || null,
-    notEarlierThan: bounds.notEarlierThan || null,
+    temporalInput: temporalInput || null, 
+    notEarlierThan: bounds.notEarlierThan || null, 
     notLaterThan: bounds.notLaterThan || null,
-    role: null, // Hardcoded to satisfy schema, removed from UX
-    properties: properties || {},
-    sourceSortOrder: sortOrder || 999,
+    properties: properties || {}, 
+    sourceSortOrder: sortOrder || 999, 
     targetSortOrder: sortOrder || 999,
     assertedBy: 'system', 
-    isActive: true,
+    isActive: true, 
     retractedAt: null, 
   });
-
   revalidatePath('/');
 }
 
 export async function retractEdge(edgeId: string) {
-  await db.update(edges)
-    .set({ isActive: false, retractedAt: new Date() })
-    .where(eq(edges.id, edgeId));
+  await db.update(edges).set({ isActive: false, retractedAt: new Date() }).where(eq(edges.id, edgeId));
   revalidatePath('/');
 }
 
-export async function updateEdgeProperties(
-  edgeId: string, 
-  newTemporalInput: string | null, 
-  newProperties?: Record<string, any> 
-) {
+export async function updateEdgeProperties(edgeId: string, newTemporalInput: string | null, newProperties?: Record<string, any>) {
   const [existingEdge] = await db.select().from(edges).where(eq(edges.id, edgeId));
   if (!existingEdge) throw new Error("Edge not found.");
 
@@ -347,22 +331,20 @@ export async function updateEdgeProperties(
   await db.update(edges).set({ isActive: false, retractedAt: new Date() }).where(eq(edges.id, edgeId));
 
   await db.insert(edges).values({
-    sourceId: existingEdge.sourceId,
-    targetId: existingEdge.targetId,
+    sourceId: existingEdge.sourceId, 
+    targetId: existingEdge.targetId, 
     predicateId: existingEdge.predicateId,
-    category: existingEdge.category as "SEMANTIC" | "STRUCTURAL" | "LINEAGE",
-    temporalInput: newTemporalInput || null,
-    notEarlierThan: bounds.notEarlierThan || null,
+    category: existingEdge.category as "SEMANTIC" | "STRUCTURAL" | "CONTAINMENT",
+    temporalInput: newTemporalInput || null, 
+    notEarlierThan: bounds.notEarlierThan || null, 
     notLaterThan: bounds.notLaterThan || null,
-    role: null, 
-    properties: updatedProps,
-    sourceSortOrder: existingEdge.sourceSortOrder,
+    properties: updatedProps, 
+    sourceSortOrder: existingEdge.sourceSortOrder, 
     targetSortOrder: existingEdge.targetSortOrder,
     assertedBy: 'system_user_edit', 
-    isActive: true,
+    isActive: true, 
     retractedAt: null, 
   });
-
   revalidatePath('/');
 }
 
@@ -371,33 +353,20 @@ export async function updateEdgeProperties(
 // ============================================================================
 
 export async function getQuickContext(nodeId: string) {
-  const connectedEdges = await db
-    .select()
-    .from(edges)
-    .where(and(eq(edges.isActive, true), or(eq(edges.sourceId, nodeId), eq(edges.targetId, nodeId))));
-
+  const connectedEdges = await db.select().from(edges).where(and(eq(edges.isActive, true), or(eq(edges.sourceId, nodeId), eq(edges.targetId, nodeId))));
   if (connectedEdges.length === 0) return [];
 
   const allPreds = await db.select().from(predicates);
   const relatedNodeIds = connectedEdges.map(e => e.sourceId === nodeId ? e.targetId : e.sourceId);
   const uniqueNodeIds = Array.from(new Set(relatedNodeIds));
-
-  const relatedNodes = await db
-    .select({ id: nodes.id, label: nodes.label })
-    .from(nodes)
-    .where(inArray(nodes.id, uniqueNodeIds));
+  const relatedNodes = await db.select({ id: nodes.id, label: nodes.label }).from(nodes).where(inArray(nodes.id, uniqueNodeIds));
 
   return connectedEdges.map(edge => {
     const isSource = edge.sourceId === nodeId;
     const targetNodeId = isSource ? edge.targetId : edge.sourceId;
     const targetNode = relatedNodes.find(n => n.id === targetNodeId);
     const pred = allPreds.find(p => p.id === edge.predicateId);
-    
-    return {
-      predicate: pred ? (isSource ? pred.forwardLabel : pred.reverseLabel) : 'UNKNOWN',
-      label: targetNode ? targetNode.label : 'Unknown Node',
-      isSystem: pred ? pred.isSystem : false
-    };
+    return { predicate: pred ? (isSource ? pred.forwardLabel : pred.reverseLabel) : 'UNKNOWN', label: targetNode ? targetNode.label : 'Unknown Node', isSystem: pred ? pred.isSystem : false };
   });
 }
 
@@ -405,12 +374,16 @@ export async function getQuickContext(nodeId: string) {
 // UX WORKFLOW ACTIONS (Compound Operations)
 // ============================================================================
 
+export async function checkDuplicateArtifact(hash: string) {
+  const [existing] = await db.select({ id: nodes.id, label: nodes.label, layer: nodes.layer }).from(nodes).where(sql`${nodes.properties}->>'hash' = ${hash}`);
+  return existing || null;
+}
+
 export async function createDigitalArtifact(
   targetId: string, 
   label: string,
-  kind: string,
-  fileData: { fileUrl: string, mimeType: string, fileSize: number, hash: string },
-  derivedFromId?: string
+  kind: string | null, // Maintained for signature compatibility, though media natively relies on MimeType
+  fileData: { fileUrl: string, mimeType: string, fileSize: number, hash: string }
 ) {
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return '0 Bytes';
@@ -421,8 +394,8 @@ export async function createDigitalArtifact(
   };
 
   const [newNode] = await db.insert(nodes).values({
-    layer: 'INSTANCE',
-    kind,
+    layer: 'MEDIA', // Strictly enforcing 3-Layer Physics
+    kind: null,
     label,
     properties: {
       fileUrl: fileData.fileUrl,
@@ -438,43 +411,21 @@ export async function createDigitalArtifact(
     targetId: targetId,
     predicateId: SYSTEM_PREDICATES.CARRIES,
     category: "STRUCTURAL",
-    role: null,
     assertedBy: 'system_user',
     isActive: true,
   });
-
-  if (derivedFromId) {
-    await db.insert(edges).values({
-      sourceId: newNode.id,
-      targetId: derivedFromId,
-      predicateId: SYSTEM_PREDICATES.DERIVED_FROM,
-      category: "LINEAGE",
-      assertedBy: 'system_user',
-      isActive: true,
-    });
-  }
 
   revalidatePath('/');
   return newNode.id;
 }
 
-export async function checkDuplicateArtifact(hash: string) {
-  const [existing] = await db
-    .select({ id: nodes.id, label: nodes.label, kind: nodes.kind })
-    .from(nodes)
-    .where(sql`${nodes.properties}->>'hash' = ${hash}`);
-  
-  return existing || null;
-}
-
 export async function linkExistingArtifact(targetId: string, instanceId: string) {
   await db.insert(edges).values({
-    sourceId: instanceId,
-    targetId: targetId,
-    predicateId: SYSTEM_PREDICATES.CARRIES,
-    category: "STRUCTURAL",
-    role: null,
-    assertedBy: 'system_user',
+    sourceId: instanceId, 
+    targetId: targetId, 
+    predicateId: SYSTEM_PREDICATES.CARRIES, 
+    category: "STRUCTURAL", 
+    assertedBy: 'system_user', 
     isActive: true,
   });
   revalidatePath('/');
@@ -482,54 +433,15 @@ export async function linkExistingArtifact(targetId: string, instanceId: string)
 
 export async function createAndLinkIdentity(label: string, kind: string, sourceId: string, predicateId: string, isReverse: boolean) {
   const [newNode] = await db.insert(nodes).values({
-    layer: 'IDENTITY',
-    kind: kind,
-    label,
-    updatedBy: "system_user", 
+    layer: 'IDENTITY', kind: kind, label, updatedBy: "system_user", 
   }).returning({ id: nodes.id });
 
   let finalSource = sourceId;
   let finalTarget = newNode.id;
-  if (isReverse) {
-    finalSource = newNode.id;
-    finalTarget = sourceId;
-  }
+  if (isReverse) { finalSource = newNode.id; finalTarget = sourceId; }
 
   await db.insert(edges).values({
-    sourceId: finalSource,
-    targetId: finalTarget,
-    predicateId,
-    category: "SEMANTIC",
-    assertedBy: 'system_user',
-    isActive: true,
+    sourceId: finalSource, targetId: finalTarget, predicateId, category: "SEMANTIC", assertedBy: 'system_user', isActive: true,
   });
-
-  revalidatePath('/');
-}
-
-export async function inheritCarriedIdentities(derivativeId: string, originalId: string) {
-  const originalCarries = await db.select().from(edges).where(
-    and(
-      eq(edges.sourceId, originalId),
-      eq(edges.predicateId, SYSTEM_PREDICATES.CARRIES),
-      eq(edges.isActive, true)
-    )
-  );
-
-  for (const edge of originalCarries) {
-    await db.insert(edges).values({
-      sourceId: derivativeId,
-      targetId: edge.targetId,
-      predicateId: SYSTEM_PREDICATES.CARRIES,
-      category: "STRUCTURAL",
-      role: null,
-      properties: edge.properties,
-      sourceSortOrder: edge.sourceSortOrder,
-      targetSortOrder: edge.targetSortOrder,
-      assertedBy: 'system_user_inherit',
-      isActive: true,
-    });
-  }
-  
   revalidatePath('/');
 }

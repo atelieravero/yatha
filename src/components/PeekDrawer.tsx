@@ -3,11 +3,6 @@
 import { useState, useEffect } from "react";
 import { getQuickContext } from "@/app/actions";
 
-const FORMAT_ICONS: Record<string, string> = {
-  'PHYSICAL_OBJECT': '📦', 'PHYSICAL_CONTAINER': '🗃️', 'IMAGE': '🖼️', 'VIDEO': '🎞️',
-  'AUDIO': '🎵', 'DOCUMENT': '📄', 'YOUTUBE_VIDEO': '📺', 'WEB_LINK': '🔗'
-};
-
 export default function PeekDrawer({
   peekNode,
   activeNodeId,
@@ -37,9 +32,31 @@ export default function PeekDrawer({
 
   if (!peekNode) return null;
 
-  const kindDef = activeKinds.find(k => k.id === peekNode.kind);
-  const icon = peekNode.layer === 'INSTANCE' ? (FORMAT_ICONS[peekNode.kind] || '📦') : (kindDef?.icon || '🟣');
-  const label = peekNode.layer === 'INSTANCE' ? peekNode.kind.replace('_', ' ') : (kindDef?.label || 'Concept');
+  // --------------------------------------------------------------------------
+  // 3-LAYER ICON & LABEL ROUTING
+  // --------------------------------------------------------------------------
+  let icon = '🟣';
+  let label = 'Concept';
+
+  if (peekNode.layer === 'PHYSICAL') {
+    icon = '📦';
+    label = 'Physical Item';
+  } else if (peekNode.layer === 'MEDIA') {
+    const mime = peekNode.properties?.mimeType || '';
+    const hash = peekNode.properties?.hash || '';
+    if (mime.startsWith('image/')) { icon = '🖼️'; label = 'Image'; }
+    else if (mime.startsWith('video/')) { icon = '🎞️'; label = 'Video'; }
+    else if (mime.startsWith('audio/')) { icon = '🎵'; label = 'Audio'; }
+    else if (peekNode.properties?.url || hash.startsWith('http')) { icon = '🔗'; label = 'Web Link'; }
+    else if (peekNode.properties?.youtube_id || hash.startsWith('youtube:')) { icon = '📺'; label = 'YouTube Video'; }
+    else { icon = '📄'; label = 'Document'; }
+  } else {
+    const kindDef = activeKinds.find(k => k.id === peekNode.kind);
+    if (kindDef) {
+      icon = kindDef.icon;
+      label = kindDef.label;
+    }
+  }
   
   const closeHref = `/?node=${activeNodeId}&tab=${currentTab}`;
   const focusHref = `/?node=${peekNode.id}`;
@@ -49,8 +66,11 @@ export default function PeekDrawer({
   const isImage = mimeType.startsWith('image/');
   const isVideo = mimeType.startsWith('video/');
   const isAudio = mimeType.startsWith('audio/');
-  const isYouTube = peekNode.kind === 'YOUTUBE_VIDEO';
-  const isWebLink = peekNode.kind === 'WEB_LINK';
+  
+  const hash = peekNode.properties?.hash || '';
+  const isYouTube = !!peekNode.properties?.youtube_id || hash.startsWith('youtube:');
+  const isWebLink = !!peekNode.properties?.url || hash.startsWith('http');
+  const ytId = peekNode.properties?.youtube_id || hash.replace('youtube:', '');
   
   const propsToDisplay = Object.entries(peekNode.properties || {}).filter(([k]) => k !== 'fileUrl' && k !== 'mimeType' && k !== 'temporal_input' && k !== 'hash');
 
@@ -92,13 +112,13 @@ export default function PeekDrawer({
             )}
           </div>
 
-          {/* 2. Media Preview (Retained!) */}
+          {/* 2. Media Preview */}
           {(securePeekUrl || isYouTube || isWebLink) && (
             <div className="rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center border border-gray-200 min-h-[160px]">
               {isYouTube ? (
                 <iframe 
                   className="w-full aspect-video" 
-                  src={`https://www.youtube.com/embed/${peekNode.properties?.hash?.replace('youtube:', '')}`} 
+                  src={`https://www.youtube.com/embed/${ytId}`} 
                   title="YouTube video player" 
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
                   allowFullScreen

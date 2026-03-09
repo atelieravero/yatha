@@ -2,19 +2,16 @@ import { pgTable, text, timestamp, boolean, jsonb, integer, uuid, check } from '
 import { sql } from 'drizzle-orm';
 
 // ============================================================================
-// SYSTEM CONSTANTS (Well-Known UUIDs)
-// These ensure our React Code and Database always perfectly align on core rules.
+// SYSTEM CONSTANTS
 // ============================================================================
 export const SYSTEM_PREDICATES = {
   CARRIES: '00000000-0000-4000-8000-000000000001',
-  DERIVED_FROM: '00000000-0000-4000-8000-000000000002',
   CONTAINS: '00000000-0000-4000-8000-000000000003',
-  // REFERENCES has been intentionally removed. 
-  // Locators (pages, coordinates, timestamps) are now handled via the JSONB properties column on standard semantic edges!
+  // LINEAGE and REFERENCES have been successfully purged!
 };
 
 // ============================================================================
-// 1. KINDS (The Strict Flat Ontology)
+// 1. KINDS (The Strict Flat Ontology for Identities)
 // ============================================================================
 export const kinds = pgTable('kinds', {
   id: uuid('id').defaultRandom().primaryKey(), 
@@ -24,7 +21,7 @@ export const kinds = pgTable('kinds', {
 });
 
 // ============================================================================
-// 1.5 PREDICATES (Semantic & System Connections)
+// 1.5 PREDICATES (Semantic Connections)
 // ============================================================================
 export const predicates = pgTable('predicates', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -36,23 +33,24 @@ export const predicates = pgTable('predicates', {
 });
 
 // ============================================================================
-// 2. NODES (Layer 1 Identities & Layer 2 Instances)
+// 2. NODES (The 3-Layer Framework)
 // ============================================================================
 export const nodes = pgTable('nodes', {
   id: uuid('id').defaultRandom().primaryKey(),
-  layer: text('layer').notNull(), // 'IDENTITY' | 'INSTANCE'
-  kind: text('kind').notNull(), // References kinds.id conceptually
+  
+  // THE NEW 3-LAYER PHYSICS
+  layer: text('layer').notNull(), // 'IDENTITY' | 'PHYSICAL' | 'MEDIA'
+  
+  // KIND IS NOW NULLABLE! Only Identity nodes require a strict taxonomy Kind.
+  kind: text('kind'), 
   
   label: text('label').notNull(),
-  
   aliases: text('aliases').array().notNull().default([]), 
   
-  // Fuzzy Temporal Bounds
   temporalInput: text('temporal_input'), 
   notEarlierThan: timestamp('not_earlier_than'), 
   notLaterThan: timestamp('not_later_than'),
   
-  // Multilingual properties & arbitrary data go here
   properties: jsonb('properties').notNull().default({}),
   
   isActive: boolean('is_active').default(true).notNull(),
@@ -69,11 +67,9 @@ export const edges = pgTable('edges', {
   targetId: uuid('target_id').notNull(),
   
   predicateId: uuid('predicate_id').notNull(), 
+  category: text('category').notNull(), // 'SEMANTIC' | 'STRUCTURAL' | 'CONTAINMENT'
   
-  category: text('category').notNull(), 
-  role: text('role'), 
-  
-  // Edge Properties for Positional Data (coordinates, timestamps, pages)
+  // Spatial/Contextual property replacing 'role' and 'REFERENCES'
   properties: jsonb('properties').notNull().default({}),
   
   sourceSortOrder: integer('source_sort_order').default(999).notNull(),
@@ -88,20 +84,19 @@ export const edges = pgTable('edges', {
   assertedAt: timestamp('asserted_at').defaultNow().notNull(),
   retractedAt: timestamp('retracted_at'), 
 }, (table) => {
-  // RULE 6: No self-references allowed in the database!
   return {
     noSelfRef: check('no_self_ref', sql`${table.sourceId} != ${table.targetId}`)
   };
 });
 
 // ============================================================================
-// 4. EVENT LOG / SNAPSHOTS (The Safety Net)
+// 4. EVENT LOG / SNAPSHOTS
 // ============================================================================
 export const nodeHistory = pgTable('node_history', {
   snapshotId: uuid('snapshot_id').defaultRandom().primaryKey(),
   nodeId: uuid('node_id').notNull(),
   
-  previousKind: text('previous_kind').notNull(),
+  previousKind: text('previous_kind'), // Nullable
   previousLabel: text('previous_label').notNull(),
   previousAliases: text('previous_aliases').array().notNull().default([]),
   previousTemporalInput: text('previous_temporal_input'),

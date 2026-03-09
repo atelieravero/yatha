@@ -5,11 +5,6 @@ import EdgeRetractButton from "@/components/EdgeRetractButton";
 import { parseFuzzyTemporal } from "@/lib/dateParser";
 import { updateEdgeProperties } from "@/app/actions";
 
-const FORMAT_ICONS: Record<string, string> = {
-  'PHYSICAL_OBJECT': '📦', 'PHYSICAL_CONTAINER': '🗃️', 'IMAGE': '🖼️', 'VIDEO': '🎞️',
-  'AUDIO': '🎵', 'DOCUMENT': '📄', 'YOUTUBE_VIDEO': '📺', 'WEB_LINK': '🔗'
-};
-
 export default function EdgeRow({
   edge,
   node,
@@ -19,7 +14,7 @@ export default function EdgeRow({
   activeNodeId,
   activeKinds,
   hideBadge = false,
-  hideEdit = false // NEW: Prevents editing properties on raw structural edges like CARRIES
+  hideEdit = false // Prevents editing properties on raw structural edges like CARRIES
 }: {
   edge: any;
   node: any;
@@ -41,9 +36,30 @@ export default function EdgeRow({
 
   const displayPredicate = isSource ? predDef.forwardLabel : predDef.reverseLabel;
 
-  const kindDef = activeKinds.find((k: any) => k.id === node.kind);
-  const icon = node.layer === 'INSTANCE' ? (FORMAT_ICONS[node.kind] || '📦') : (kindDef?.icon || '🟣');
-  const kindLabel = node.layer === 'INSTANCE' ? node.kind.replace('_', ' ') : (kindDef?.label || 'Concept');
+  // --------------------------------------------------------------------------
+  // 3-LAYER ICON & LABEL ROUTING
+  // --------------------------------------------------------------------------
+  let icon = '🟣';
+  let kindLabel = 'Concept';
+
+  if (node.layer === 'PHYSICAL') {
+    icon = '📦';
+    kindLabel = 'Physical Item';
+  } else if (node.layer === 'MEDIA') {
+    const mime = node.properties?.mimeType || '';
+    if (mime.startsWith('image/')) { icon = '🖼️'; kindLabel = 'Image'; }
+    else if (mime.startsWith('video/')) { icon = '🎞️'; kindLabel = 'Video'; }
+    else if (mime.startsWith('audio/')) { icon = '🎵'; kindLabel = 'Audio'; }
+    else if (node.properties?.url) { icon = '🔗'; kindLabel = 'Web Link'; }
+    else if (node.properties?.youtube_id) { icon = '📺'; kindLabel = 'YouTube Video'; }
+    else { icon = '📄'; kindLabel = 'Document'; }
+  } else {
+    const kindDef = activeKinds.find((k: any) => k.id === node.kind);
+    if (kindDef) {
+      icon = kindDef.icon;
+      kindLabel = kindDef.label;
+    }
+  }
 
   useEffect(() => {
     if (isEditing && temporalInput !== undefined) {
@@ -55,8 +71,7 @@ export default function EdgeRow({
   const handleSave = () => {
     startTransition(async () => {
       const props = locator.trim() ? { locator: locator.trim() } : {};
-      // Pass null for the deprecated 'role' argument
-      await updateEdgeProperties(edge.id, temporalInput || null, null, props);
+      await updateEdgeProperties(edge.id, temporalInput || null, props);
       setIsEditing(false);
     });
   };

@@ -9,26 +9,16 @@ import { createNode, searchGraphNodes } from "@/app/actions";
 type Node = {
   id: string;
   label: string;
-  layer: "IDENTITY" | "INSTANCE";
-  kind: string; 
+  layer: "IDENTITY" | "PHYSICAL" | "MEDIA";
+  kind?: string | null; 
   aliases?: string[];
+  properties?: Record<string, any>;
 };
 
 type Kind = {
   id: string;
   label: string;
   icon: string;
-};
-
-const FORMAT_ICONS: Record<string, string> = {
-  'PHYSICAL_OBJECT': '📦',
-  'PHYSICAL_CONTAINER': '🗃️',
-  'IMAGE': '🖼️',
-  'VIDEO': '🎞️',
-  'AUDIO': '🎵',
-  'DOCUMENT': '📄',
-  'YOUTUBE_VIDEO': '📺',
-  'WEB_LINK': '🔗'
 };
 
 export default function Sidebar({ 
@@ -77,7 +67,6 @@ export default function Sidebar({
   // STRICT 3-LAYER UI GROUPING
   // ============================================================================
   
-  // 1. Identities (Concepts, People, Works)
   const identitiesByKind = filteredNodes
     .filter((n) => n.layer === "IDENTITY")
     .reduce((acc, node) => {
@@ -87,23 +76,22 @@ export default function Sidebar({
       return acc;
     }, {} as Record<string, Node[]>);
 
-  // 2. Physical Items (Tangible Objects & Containers)
-  const physicalByFormat = filteredNodes
-    .filter((n) => n.layer === "INSTANCE" && (n.kind === 'PHYSICAL_OBJECT' || n.kind === 'PHYSICAL_CONTAINER'))
-    .reduce((acc, node) => {
-      const k = node.kind || 'PHYSICAL_OBJECT';
-      if (!acc[k]) acc[k] = [];
-      acc[k].push(node);
-      return acc;
-    }, {} as Record<string, Node[]>);
-
-  // 3. Digital Media (Files & Links)
+  const physicalNodes = filteredNodes.filter((n) => n.layer === "PHYSICAL");
+  
+  // Media grouping by Mime Type prefix
   const mediaByFormat = filteredNodes
-    .filter((n) => n.layer === "INSTANCE" && n.kind !== 'PHYSICAL_OBJECT' && n.kind !== 'PHYSICAL_CONTAINER')
+    .filter((n) => n.layer === "MEDIA")
     .reduce((acc, node) => {
-      const k = node.kind || 'DOCUMENT';
-      if (!acc[k]) acc[k] = [];
-      acc[k].push(node);
+      let format = 'Document';
+      const mime = node.properties?.mimeType || '';
+      if (mime.startsWith('image/')) format = 'Image';
+      else if (mime.startsWith('video/')) format = 'Video';
+      else if (mime.startsWith('audio/')) format = 'Audio';
+      else if (node.properties?.url) format = 'Web Link';
+      else if (node.properties?.youtube_id) format = 'YouTube';
+
+      if (!acc[format]) acc[format] = [];
+      acc[format].push(node);
       return acc;
     }, {} as Record<string, Node[]>);
 
@@ -113,12 +101,20 @@ export default function Sidebar({
     return { label: kindId || 'Unclassified', icon: '🟣' };
   };
 
+  const getMediaIcon = (format: string) => {
+    const icons: Record<string, string> = { 'Image': '🖼️', 'Video': '🎞️', 'Audio': '🎵', 'Web Link': '🔗', 'YouTube': '📺' };
+    return icons[format] || '📄';
+  };
+
   const handleTrack1Submit = async () => {
     if (!newLabel.trim() || !newKindLayer) return;
     try {
       setIsSubmitting(true);
       const [layer, kind] = newKindLayer.split('|');
-      const newId = await createNode(newLabel.trim(), layer as any, kind);
+      
+      // If PHYSICAL, kind is passed as null to the DB.
+      const parsedKind = kind === "null" ? null : kind;
+      const newId = await createNode(newLabel.trim(), layer as any, parsedKind);
       
       setIsMintingTrack1(false);
       setNewLabel("");
@@ -134,7 +130,6 @@ export default function Sidebar({
   return (
     <div className="w-72 bg-white border-r border-gray-200 h-screen flex flex-col flex-shrink-0 z-10 relative">
       
-      {/* Brand Header */}
       <div className="p-4 pb-3 flex items-center gap-2">
         <span className="text-xl">📚</span>
         <h1 className="font-serif font-bold text-xl tracking-tight text-gray-900">
@@ -142,7 +137,6 @@ export default function Sidebar({
         </h1>
       </div>
 
-      {/* Global Search */}
       <div className="px-4 pb-4">
         <div className="relative">
           <span className="absolute left-3 top-2 text-gray-400 text-sm">
@@ -158,7 +152,6 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* The Two-Track Master Creation Buttons */}
       <div className="px-4 pb-4 border-b border-gray-100 flex gap-2">
         <button 
           onClick={() => { setIsMintingTrack1(true); setIsUploadingTrack2(false); }}
@@ -176,7 +169,6 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* TRACK 1: Inline Form */}
       {isMintingTrack1 && (
         <div className="p-4 border-b border-gray-200 bg-blue-50/30 animate-in fade-in slide-in-from-top-2">
           <div className="flex justify-between items-center mb-3">
@@ -204,10 +196,7 @@ export default function Sidebar({
             <optgroup label="Identities (Concepts, People, Works)">
                {activeKinds.map(k => <option key={k.id} value={`IDENTITY|${k.id}`}>{k.icon} {k.label}</option>)}
             </optgroup>
-            <optgroup label="Physical Items (Tangible)">
-               <option value="INSTANCE|PHYSICAL_OBJECT">📦 Physical Object</option>
-               <option value="INSTANCE|PHYSICAL_CONTAINER">🗃️ Physical Container</option>
-            </optgroup>
+            <option value="PHYSICAL|null">📦 Physical Item / Container</option>
           </select>
           
           <div className="flex justify-end gap-2">
@@ -219,19 +208,15 @@ export default function Sidebar({
         </div>
       )}
 
-      {/* TRACK 2: Global Upload Wrapper */}
       {isUploadingTrack2 && (
         <div className="animate-in fade-in">
-           {/* We use the newly updated MediaUploader which handles 'GLOBAL' mode internally */}
            <MediaUploader asButton={false} />
-           {/* Add a close button specifically for the sidebar context if the user wants to cancel without uploading */}
            <div className="p-4 border-b border-gray-200 flex justify-center bg-gray-50">
                <button onClick={() => setIsUploadingTrack2(false)} className="text-xs font-medium text-gray-500 hover:text-gray-800 cursor-pointer">Cancel Global Upload</button>
            </div>
         </div>
       )}
 
-      {/* Navigation Tree */}
       <div className="flex-1 overflow-y-auto p-4 space-y-8">
         
         {/* 1. IDENTITIES */}
@@ -264,34 +249,26 @@ export default function Sidebar({
           {Object.keys(identitiesByKind).length === 0 && <p className="text-xs text-gray-400 italic px-2">No identities found.</p>}
         </div>
 
-        {/* 2. PHYSICAL INSTANCES */}
+        {/* 2. PHYSICAL ITEMS */}
         <div className="pt-4 border-t border-gray-100">
           <h2 className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest bg-emerald-50 px-2 py-1 rounded w-fit mb-4">
             Physical Items
           </h2>
-          {Object.entries(physicalByFormat).map(([format, nodes]) => (
-            <div key={format} className="mb-4">
-              <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-2 mb-1.5 flex items-center gap-1.5">
-                <span className="text-xs opacity-80">{FORMAT_ICONS[format] || '📦'}</span> {format.replace('_', ' ')}
-              </h3>
-              <ul className="space-y-0.5">
-                {nodes.map((node) => (
-                  <li key={node.id}>
-                    <a href={`/?node=${node.id}`} className={`block px-3 py-1.5 rounded-md text-sm transition-colors overflow-hidden ${activeNodeId === node.id ? "bg-emerald-50 text-emerald-800 font-medium" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"}`}>
-                      <span className="truncate block">
-                        {node.label}
-                        {node.aliases && node.aliases.length > 0 && <span className="text-gray-400 font-normal ml-1.5 text-[10px]">({node.aliases.join(', ')})</span>}
-                      </span>
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-          {Object.keys(physicalByFormat).length === 0 && <p className="text-xs text-gray-400 italic px-2">No physical items found.</p>}
+          <ul className="space-y-0.5">
+            {physicalNodes.map((node) => (
+              <li key={node.id}>
+                <a href={`/?node=${node.id}`} className={`block px-3 py-1.5 rounded-md text-sm transition-colors overflow-hidden ${activeNodeId === node.id ? "bg-emerald-50 text-emerald-800 font-medium" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"}`}>
+                  <span className="truncate block">
+                    <span className="opacity-80 mr-1">📦</span> {node.label}
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+          {physicalNodes.length === 0 && <p className="text-xs text-gray-400 italic px-2">No physical items found.</p>}
         </div>
 
-        {/* 3. MEDIA INSTANCES */}
+        {/* 3. DIGITAL MEDIA */}
         <div className="pt-4 border-t border-gray-100">
           <h2 className="text-[10px] font-bold text-amber-600 uppercase tracking-widest bg-amber-50 px-2 py-1 rounded w-fit mb-4">
             Digital Media
@@ -299,7 +276,7 @@ export default function Sidebar({
           {Object.entries(mediaByFormat).map(([format, nodes]) => (
             <div key={format} className="mb-4">
               <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-2 mb-1.5 flex items-center gap-1.5">
-                <span className="text-xs opacity-80">{FORMAT_ICONS[format] || '📄'}</span> {format.replace('_', ' ')}
+                <span className="text-xs opacity-80">{getMediaIcon(format)}</span> {format}
               </h3>
               <ul className="space-y-0.5">
                 {nodes.map((node) => (
@@ -307,7 +284,6 @@ export default function Sidebar({
                     <a href={`/?node=${node.id}`} className={`block px-3 py-1.5 rounded-md text-sm transition-colors overflow-hidden ${activeNodeId === node.id ? "bg-amber-50 text-amber-800 font-medium" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"}`}>
                       <span className="truncate block">
                         {node.label}
-                        {node.aliases && node.aliases.length > 0 && <span className="text-gray-400 font-normal ml-1.5 text-[10px]">({node.aliases.join(', ')})</span>}
                       </span>
                     </a>
                   </li>
@@ -320,12 +296,8 @@ export default function Sidebar({
         
       </div>
 
-      {/* FOOTER: Settings & Dictionary Link */}
       <div className="p-4 border-t border-gray-200 bg-gray-50/50 mt-auto flex-shrink-0">
-        <a 
-          href="/dictionary" 
-          className="flex items-center gap-2 text-xs font-bold text-gray-500 hover:text-gray-900 uppercase tracking-widest transition-colors cursor-pointer"
-        >
+        <a href="/dictionary" className="flex items-center gap-2 text-xs font-bold text-gray-500 hover:text-gray-900 uppercase tracking-widest transition-colors cursor-pointer">
           <span className="text-sm">⚙️</span> Manage Taxonomy
         </a>
       </div>

@@ -7,15 +7,15 @@ import { parseFuzzyTemporal } from "@/lib/dateParser";
 export default function PropertiesEditor({
   nodeId,
   layer,
-  kind,
+  kind, // Kept in signature for backwards compatibility with page.tsx, though unused for Physical/Media now
   initialProps,
   allNodes,
   notEarlierThan,
   notLaterThan
 }: {
   nodeId: string;
-  layer: "IDENTITY" | "INSTANCE";
-  kind: string;
+  layer: "IDENTITY" | "PHYSICAL" | "MEDIA";
+  kind: string | null;
   initialProps: Record<string, any>;
   allNodes: any[];
   notEarlierThan?: Date | null;
@@ -34,25 +34,34 @@ export default function PropertiesEditor({
     }
   }, [formData, isEditing]);
 
+  // --------------------------------------------------------------------------
+  // 3-LAYER DYNAMIC SCHEMA ROUTING
+  // --------------------------------------------------------------------------
   let schema: string[] = ['temporal_input'];
   
   if (layer === 'IDENTITY') {
     schema.push('standardized_id', 'notes');
-  } else {
-    if (kind === 'PHYSICAL_OBJECT') schema.push('location', 'condition', 'call_number', 'dimensions', 'notes');
-    else if (kind === 'PHYSICAL_CONTAINER') schema.push('location', 'container_type', 'barcode', 'condition', 'notes');
-    else if (kind === 'IMAGE') schema.push('width', 'height', 'fileSize', 'hash', 'notes');
-    else if (kind === 'VIDEO') schema.push('duration', 'resolution', 'fileSize', 'hash', 'notes');
-    else if (kind === 'AUDIO') schema.push('duration', 'fileSize', 'hash', 'notes');
-    else if (kind === 'DOCUMENT') schema.push('pageCount', 'fileSize', 'hash', 'notes');
-    else if (kind === 'YOUTUBE_VIDEO') schema.push('youtube_id', 'notes');
-    else if (kind === 'WEB_LINK') schema.push('url', 'archive_url', 'access_date', 'notes');
-    else schema.push('notes');
+  } 
+  else if (layer === 'PHYSICAL') {
+    // Merged physical properties. Collections vs Objects handled naturally.
+    schema.push('location', 'condition', 'call_number', 'barcode', 'dimensions', 'notes');
+  } 
+  else if (layer === 'MEDIA') {
+    // Media schema routes purely based on system-detected MimeTypes or URL properties
+    const mimeType = initialProps.mimeType || '';
+    if (mimeType.startsWith('image/')) schema.push('width', 'height', 'fileSize', 'hash', 'notes');
+    else if (mimeType.startsWith('video/')) schema.push('duration', 'resolution', 'fileSize', 'hash', 'notes');
+    else if (mimeType.startsWith('audio/')) schema.push('duration', 'fileSize', 'hash', 'notes');
+    else if (mimeType.includes('pdf') || mimeType.includes('document')) schema.push('pageCount', 'fileSize', 'hash', 'notes');
+    else if (initialProps.youtube_id) schema.push('youtube_id', 'notes');
+    else if (initialProps.url) schema.push('url', 'archive_url', 'access_date', 'notes');
+    else schema.push('fileSize', 'hash', 'notes'); // Generic fallback
   }
 
   const handleSave = () => {
     startTransition(async () => {
       const cleanedProps = { ...formData };
+      // Strip empty strings to keep JSONB clean
       for (const key in cleanedProps) {
         if (!cleanedProps[key] || cleanedProps[key].trim() === '') {
           delete cleanedProps[key];
@@ -72,7 +81,7 @@ export default function PropertiesEditor({
 
   const displayProps = Object.entries(initialProps).filter(([k]) => k !== 'fileUrl' && k !== 'mimeType' && k !== 'temporal_input');
 
-  // Point 1 & 1a: Read-Only Mode - Compact, title-less presentation
+  // Read-Only Mode - Compact, title-less presentation
   if (!isEditing) {
     return (
       <div className="mb-6 p-4 bg-white border border-gray-200 rounded-xl shadow-sm text-sm text-gray-800 relative group transition-colors min-h-[60px]">
@@ -89,7 +98,7 @@ export default function PropertiesEditor({
           Edit ✎
         </button>
         
-        {/* IDENTITY Presentation (Point 1) */}
+        {/* IDENTITY Presentation */}
         {layer === 'IDENTITY' ? (
           <div className="flex flex-col gap-1 pr-16">
             <div className="flex flex-wrap items-baseline gap-3">
@@ -106,7 +115,7 @@ export default function PropertiesEditor({
             )}
           </div>
         ) : (
-          /* INSTANCE Presentation (Point 1a) */
+          /* PHYSICAL & MEDIA Presentation */
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pr-16">
              {displayProps.length === 0 && !initialProps.temporal_input ? (
                <span className="italic text-gray-400 text-xs">No intrinsic properties defined.</span>
@@ -114,7 +123,7 @@ export default function PropertiesEditor({
                <>
                  {initialProps.temporal_input && <span className="font-semibold text-gray-900">{initialProps.temporal_input}</span>}
                  {displayProps.map(([key, val]) => (
-                   <span key={key} className={key === 'hash' ? "text-gray-500 font-mono text-[10px] break-all bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded" : "text-gray-800 font-medium"}>
+                   <span key={key} className={key === 'hash' || key === 'url' ? "text-gray-500 font-mono text-[10px] break-all bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded" : "text-gray-800 font-medium"}>
                      {String(val)}
                    </span>
                  ))}
@@ -138,15 +147,13 @@ export default function PropertiesEditor({
           const isNotes = key === 'notes';
           const isTemporal = key === 'temporal_input';
           
-          // Point 5: For instances, system properties (hash, fileSize, duration, etc.) are locked, but notes/location are editable
-          const isSystemLocked = layer === 'INSTANCE' 
-            ? (key !== 'notes' && key !== 'temporal_input' && key !== 'location' && key !== 'condition' && key !== 'call_number' && key !== 'dimensions' && key !== 'container_type' && key !== 'barcode' && key !== 'youtube_id' && key !== 'url') 
-            : (key === 'hash' || key === 'fileSize');
+          // Strictly lock payload properties. Users shouldn't edit hashes or URLs directly, they should upload a new file.
+          const isSystemLocked = (key === 'hash' || key === 'fileSize' || key === 'mimeType' || key === 'fileUrl' || key === 'youtube_id' || key === 'url');
             
           const displayLabel = isTemporal ? 'Temporal Bounds' : key.replace('_', ' ');
 
           return (
-            <div key={key} className={isNotes || key === 'hash' || isTemporal ? "sm:col-span-2" : ""}>
+            <div key={key} className={isNotes || key === 'hash' || key === 'url' || isTemporal ? "sm:col-span-2" : ""}>
               <label className="font-bold text-gray-500 uppercase tracking-wider text-[10px] mb-1.5 block">
                 {displayLabel} {isSystemLocked && "(Locked)"}
               </label>

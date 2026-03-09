@@ -3,10 +3,6 @@
 import { useState, useTransition } from "react";
 import { createKind, updateKind, deactivateAndMigrateKind } from "@/app/actions";
 
-const INSTANCE_FORMATS = [
-  'PHYSICAL_OBJECT', 'PHYSICAL_CONTAINER', 'IMAGE', 'VIDEO', 'AUDIO', 'DOCUMENT', 'YOUTUBE_VIDEO', 'WEB_LINK'
-];
-
 // Point 8: Curated, lightweight archival emoji grid
 const EMOJI_GRID = [
   '🟣', '📚', '🖼️', '👤', '🏛️', '🗺️', '📜', '🎵', 
@@ -51,12 +47,7 @@ export default function DictionaryClient({
   const validateKindName = (label: string, excludeId?: string) => {
     const normalized = label.trim().toLowerCase();
     
-    // 1. Forbid formats (checks both 'PHYSICAL_OBJECT' and 'physical object')
-    if (INSTANCE_FORMATS.some(f => f.toLowerCase().replace(/_/g, ' ') === normalized || f.toLowerCase() === normalized)) {
-      return "Reserved name: Cannot use an Instance format.";
-    }
-    
-    // 2. Forbid other active kinds
+    // Forbid other active kinds
     if (activeKinds.some(k => k.id !== excludeId && k.label.toLowerCase() === normalized)) {
       return "An active classification with this name already exists.";
     }

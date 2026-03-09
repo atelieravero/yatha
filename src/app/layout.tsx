@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Sidebar from "@/components/Sidebar";
 import "./globals.css";
-// ADD getAllKinds to your import!
 import { getRecentNodes, getAllKinds } from "@/app/actions";
 
 export const metadata: Metadata = {
@@ -17,9 +16,14 @@ export default async function RootLayout({
   // Fetch the nodes from the database directly in the server layout!
   const rawNodes = await getRecentNodes();
 
+  // Safely cast the raw nodes into the strict type expected by the Sidebar
   const nodes = rawNodes.map(node => ({
-    ...node,
-    layer: node.layer as "IDENTITY" | "INSTANCE"
+    id: node.id,
+    label: node.label,
+    layer: node.layer as "IDENTITY" | "PHYSICAL" | "MEDIA",
+    kind: node.kind,
+    aliases: node.aliases || [],
+    properties: (node.properties as Record<string, any>) || {}
   }));
 
   // Fetch the active dictionary kinds for the sidebar's Track 1 Creation Dropdown
