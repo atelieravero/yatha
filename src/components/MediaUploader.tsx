@@ -27,7 +27,6 @@ export default function MediaUploader({
   
   // Confirmation State
   const [label, setLabel] = useState("");
-  const [role, setRole] = useState("");
   const [isDerived, setIsDerived] = useState(false);
   const [derivedFromId, setDerivedFromId] = useState("");
   
@@ -51,6 +50,8 @@ export default function MediaUploader({
     setIsDragging(false);
     setLabel("");
     setPayload(null);
+    setIsDerived(false);
+    setDerivedFromId("");
   };
 
   // --- Step 1: Input & Analysis (FILE) ---
@@ -151,7 +152,7 @@ export default function MediaUploader({
         await createDigitalArtifact(
           identityId, label.trim(), payload.kind, 
           { fileUrl: finalFileUrl, mimeType: payload.mimeType, fileSize: payload.fileSize, hash: payload.hash },
-          role || undefined, isDerived ? derivedFromId : undefined
+          isDerived ? derivedFromId : undefined
         );
         handleClose();
         if (typeof window !== 'undefined') window.location.reload();
@@ -184,7 +185,7 @@ export default function MediaUploader({
     if (mode === "CONTEXTUAL" && identityId) {
       setStep('UPLOADING');
       setStatus("Linking existing artifact...");
-      await linkExistingArtifact(identityId, duplicateFound.id, role || undefined);
+      await linkExistingArtifact(identityId, duplicateFound.id);
       handleClose();
       if (typeof window !== 'undefined') window.location.reload();
     } else {
@@ -300,33 +301,17 @@ export default function MediaUploader({
             </div>
           )}
 
-          {mode === 'CONTEXTUAL' && (
-            <div className="space-y-3 p-3 bg-gray-50 border border-gray-200 rounded-md">
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Role / Context (Optional)</label>
-                <select value={role} onChange={(e) => setRole(e.target.value)} className="w-full p-2 text-xs border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                  <option value="">-- Generic Attachment --</option>
-                  <option value="digital copy">Digital Copy (Exact replication)</option>
-                  <option value="transcript">Transcript / Translation</option>
-                  <option value="primary subject">Primary Subject</option>
-                  <option value="thumbnail">Thumbnail</option>
-                  <option value="evidence">Evidence / Mentions</option>
+          {mode === 'CONTEXTUAL' && physicalHoldings.length > 0 && tab === 'FILE' && (
+            <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 cursor-pointer mb-2">
+                <input type="checkbox" checked={isDerived} onChange={(e) => setIsDerived(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
+                Digitized from a physical holding?
+              </label>
+              {isDerived && (
+                <select value={derivedFromId} onChange={(e) => setDerivedFromId(e.target.value)} className="w-full p-2 text-xs border border-blue-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50/30">
+                  <option value="">Select source material...</option>
+                  {physicalHoldings.map(h => <option key={h.id} value={h.id}>{h.label}</option>)}
                 </select>
-              </div>
-
-              {physicalHoldings.length > 0 && tab === 'FILE' && (
-                <div className="pt-2 border-t border-gray-200">
-                  <label className="flex items-center gap-2 text-xs font-medium text-gray-700 cursor-pointer mb-2">
-                    <input type="checkbox" checked={isDerived} onChange={(e) => setIsDerived(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-                    Digitized from a physical holding?
-                  </label>
-                  {isDerived && (
-                    <select value={derivedFromId} onChange={(e) => setDerivedFromId(e.target.value)} className="w-full p-2 text-xs border border-blue-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50/30">
-                      <option value="">Select source material...</option>
-                      {physicalHoldings.map(h => <option key={h.id} value={h.id}>{h.label}</option>)}
-                    </select>
-                  )}
-                </div>
               )}
             </div>
           )}
