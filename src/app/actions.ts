@@ -5,6 +5,7 @@ import { nodes, edges, nodeHistory, kinds, predicates, SYSTEM_PREDICATES } from 
 import { eq, desc, ilike, or, sql, and, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { generateUploadUrl, generateReadUrl } from "@/lib/s3";
+import { parseFuzzyTemporal } from "@/lib/dateParser";
 
 // ============================================================================
 // NODE RETRIEVAL
@@ -25,9 +26,7 @@ export async function searchGraphNodes(query: string) {
     .from(nodes)
     .where(
       or(
-        // 1. Search the primary label
         ilike(nodes.label, `%${query}%`),
-        // 2. Search the aliases array (converts the text[] to a string for fuzzy matching)
         sql`array_to_string(${nodes.aliases}, ', ') ILIKE ${`%${query}%`}`
       )
     )
@@ -38,10 +37,6 @@ export async function searchGraphNodes(query: string) {
 // EVENT LEDGER (Audit Trail Helper)
 // ============================================================================
 
-/**
- * Captures the current state of a node and saves it to the history ledger 
- * before any destructive updates occur.
- */
 async function captureNodeSnapshot(nodeId: string, userId: string = "system_user") {
   const [currentNode] = await db.select().from(nodes).where(eq(nodes.id, nodeId));
   
@@ -49,7 +44,6 @@ async function captureNodeSnapshot(nodeId: string, userId: string = "system_user
     throw new Error("Node not found");
   }
 
-  // Insert the historical snapshot
   await db.insert(nodeHistory).values({
     nodeId: currentNode.id,
     previousKind: currentNode.kind,
@@ -75,10 +69,8 @@ export async function restoreNodeSnapshot(nodeId: string, snapshotId: string) {
   const [snapshot] = await db.select().from(nodeHistory).where(eq(nodeHistory.snapshotId, snapshotId));
   if (!snapshot) throw new Error("Snapshot not found");
 
-  // Capture current state before overwriting so we don't lose the present!
   await captureNodeSnapshot(nodeId, "system_user_restored");
 
-  // Re-parse the fuzzy temporal bounds for the native columns
   const bounds = parseFuzzyTemporal(snapshot.previousTemporalInput);
 
   await db.update(nodes)
@@ -99,7 +91,7 @@ export async function restoreNodeSnapshot(nodeId: string, snapshotId: string) {
 }
 
 // ============================================================================
-// TAXONOMY MANAGEMENT (KINDS)
+// TAXONOMY MANAGEMENT (KINDS & PREDICATES)
 // ============================================================================
 
 export async function getAllKinds() {
@@ -107,73 +99,45 @@ export async function getAllKinds() {
 }
 
 export async function createKind(label: string, icon: string) {
-  await db.insert(kinds).values({
-    label,
-    icon: icon || '🟣',
-    isActive: true,
-  });
-
+  await db.insert(kinds).values({ label, icon: icon || '🟣', isActive: true });
   revalidatePath('/');
 }
 
 export async function updateKind(id: string, label: string, icon: string) {
-  await db.update(kinds)
-    .set({ 
-      label, 
-      icon: icon || '🟣' 
-    })
-    .where(eq(kinds.id, id));
-  
+  await db.update(kinds).set({ label, icon: icon || '🟣' }).where(eq(kinds.id, id));
   revalidatePath('/');
 }
 
 export async function deactivateAndMigrateKind(oldKindId: string, newKindId: string) {
   if (oldKindId === newKindId) throw new Error("Cannot migrate a kind to itself.");
 
-  // 1. Fetch all nodes using the old kind
   const affectedNodes = await db.select().from(nodes).where(eq(nodes.kind, oldKindId));
 
-  // 2. Capture a historical snapshot for each node before mutating
   for (const node of affectedNodes) {
     await captureNodeSnapshot(node.id, "system_admin_migration");
   }
 
-  // 3. Bulk migrate the nodes to the new kind
   if (affectedNodes.length > 0) {
     await db.update(nodes)
-      .set({ 
-        kind: newKindId, 
-        updatedAt: new Date(),
-        updatedBy: "system_admin_migration"
-      })
+      .set({ kind: newKindId, updatedAt: new Date(), updatedBy: "system_admin_migration" })
       .where(eq(nodes.kind, oldKindId));
   }
 
-  // 4. Soft-delete (deactivate) the old kind
-  await db.update(kinds)
-    .set({ isActive: false })
-    .where(eq(kinds.id, oldKindId));
-
+  await db.update(kinds).set({ isActive: false }).where(eq(kinds.id, oldKindId));
   revalidatePath('/');
 }
-
-// ============================================================================
-// TAXONOMY MANAGEMENT (PREDICATES)
-// ============================================================================
 
 export async function getAllPredicates() {
   return await db.select().from(predicates).orderBy(predicates.forwardLabel);
 }
 
 export async function seedSystemPredicates() {
-  // REMOVED references crutch from seeding!
   const systemPreds = [
     { id: SYSTEM_PREDICATES.CARRIES, forwardLabel: 'CARRIES', reverseLabel: 'instantiated in', isSymmetric: false, isSystem: true, isActive: true },
     { id: SYSTEM_PREDICATES.DERIVED_FROM, forwardLabel: 'DERIVED FROM', reverseLabel: 'source of', isSymmetric: false, isSystem: true, isActive: true },
     { id: SYSTEM_PREDICATES.CONTAINS, forwardLabel: 'CONTAINS', reverseLabel: 'part of', isSymmetric: false, isSystem: true, isActive: true },
   ];
   for (const pred of systemPreds) {
-    // Upsert prevents crashing if they already exist in the DB
     await db.insert(predicates).values(pred).onConflictDoNothing();
   }
 }
@@ -191,11 +155,7 @@ export async function createPredicate(forwardLabel: string, reverseLabel: string
 
 export async function updatePredicate(id: string, forwardLabel: string, reverseLabel: string, isSymmetric: boolean) {
   await db.update(predicates)
-    .set({ 
-      forwardLabel, 
-      reverseLabel: isSymmetric ? forwardLabel : reverseLabel,
-      isSymmetric 
-    })
+    .set({ forwardLabel, reverseLabel: isSymmetric ? forwardLabel : reverseLabel, isSymmetric })
     .where(eq(predicates.id, id));
   revalidatePath('/');
 }
@@ -218,7 +178,7 @@ export async function deactivateAndMigratePredicate(oldId: string, newId: string
 }
 
 // ============================================================================
-// NODE CREATION & UPDATES (Sidebar & Editor)
+// NODE CREATION & UPDATES
 // ============================================================================
 
 export async function createNode(label: string, layer: "IDENTITY" | "INSTANCE", kind: string) {
@@ -286,7 +246,7 @@ export async function updateNodeProperties(nodeId: string, newProps: any) {
 }
 
 // ============================================================================
-// MEDIA HANDLING (Cloudflare R2)
+// MEDIA HANDLING
 // ============================================================================
 
 export async function getUploadTicket(filename: string, contentType: string) {
@@ -306,18 +266,11 @@ export async function attachFileToNode(nodeId: string, fileUrl: string, mimeType
   };
 
   const updatedProps = { 
-    ...existingProps, 
-    fileUrl, 
-    mimeType,
-    fileSize: formatBytes(fileSize),
-    hash
+    ...existingProps, fileUrl, mimeType, fileSize: formatBytes(fileSize), hash
   };
 
   await db.update(nodes)
-    .set({ 
-      properties: updatedProps,
-      updatedAt: new Date()
-    })
+    .set({ properties: updatedProps, updatedAt: new Date() })
     .where(eq(nodes.id, nodeId));
   
   revalidatePath('/'); 
@@ -325,100 +278,6 @@ export async function attachFileToNode(nodeId: string, fileUrl: string, mimeType
 
 export async function getSecureMediaUrl(filename: string) {
   return await generateReadUrl(filename);
-}
-
-// ============================================================================
-// TEMPORAL PARSING UTILITY
-// ============================================================================
-
-function parseFuzzyTemporal(fuzzyDateStr?: string | null): { notEarlierThan?: Date, notLaterThan?: Date } {
-  if (!fuzzyDateStr) return {};
-  
-  try {
-    const str = fuzzyDateStr.toLowerCase().trim();
-    let parts: string[];
-    
-    if (str.includes('~')) {
-      parts = str.split('~').map(s => s.trim());
-    } else if (str.match(/^-?\d{1,4}-$/)) {
-      parts = [str.slice(0, -1), ""]; 
-    } else {
-      parts = [str];
-    }
-
-    const createUTC = (y: number, m: number, d: number, isEnd: boolean) => {
-      const date = new Date(Date.UTC(y, m, d, isEnd ? 23 : 0, isEnd ? 59 : 0, isEnd ? 59 : 0, isEnd ? 999 : 0));
-      if (y >= 0 && y < 100) date.setUTCFullYear(y); 
-      return date;
-    };
-    
-    const parsePart = (p: string, isStart: boolean): Date | null | undefined => {
-      if (!p || p === '?') return null; 
-
-      const centuryMatch = p.match(/^(\d+)(st|nd|rd|th)?\s*century$/);
-      if (centuryMatch) {
-        const century = parseInt(centuryMatch[1]);
-        const startYear = (century - 1) * 100 + 1; 
-        const endYear = century * 100;             
-        return isStart ? createUTC(startYear, 0, 1, false) : createUTC(endYear, 11, 31, true);
-      }
-
-      const decadeMatch = p.match(/^(\d{3,4})s$/);
-      if (decadeMatch) {
-        const decade = parseInt(decadeMatch[1]);
-        return isStart ? createUTC(decade, 0, 1, false) : createUTC(decade + 9, 11, 31, true);
-      }
-
-      const dateMatch = p.match(/^(-?(?:0|[1-9]\d{0,3}))(?:-(0?[1-9]|1[0-2]))?(?:-(0?[1-9]|[12]\d|3[01]))?$/);
-      if (dateMatch) {
-        const year = parseInt(dateMatch[1]);
-        const month = dateMatch[2] ? parseInt(dateMatch[2]) - 1 : undefined;
-        const day = dateMatch[3] ? parseInt(dateMatch[3]) : undefined;
-        
-        if (year > 10000 || year < -10000) return undefined;
-        
-        if (month === undefined) {
-          return isStart ? createUTC(year, 0, 1, false) : createUTC(year, 11, 31, true);
-        } else if (day === undefined) {
-          if (month < 0 || month > 11) return undefined;
-          let tmp = new Date(Date.UTC(year, month + 1, 0));
-          if (year >= 0 && year < 100) tmp.setUTCFullYear(year);
-          return isStart ? createUTC(year, month, 1, false) : createUTC(year, month, tmp.getUTCDate(), true);
-        } else {
-          if (month < 0 || month > 11 || day < 1 || day > 31) return undefined;
-          return isStart ? createUTC(year, month, day, false) : createUTC(year, month, day, true);
-        }
-      }
-
-      return undefined;
-    };
-
-    let notEarlierThan: Date | undefined = undefined;
-    let notLaterThan: Date | undefined = undefined;
-
-    if (parts.length === 1) {
-       const start = parsePart(parts[0], true);
-       const end = parsePart(parts[0], false);
-       if (start === undefined || end === undefined) return {};
-       notEarlierThan = start === null ? undefined : start;
-       notLaterThan = end === null ? undefined : end;
-    } else if (parts.length === 2) {
-       const start = parsePart(parts[0], true);
-       const end = parsePart(parts[1], false);
-       if (start === undefined || end === undefined) return {};
-       notEarlierThan = start === null ? undefined : start;
-       notLaterThan = end === null ? undefined : end;
-    }
-
-    if (notEarlierThan && notLaterThan && notEarlierThan.getTime() > notLaterThan.getTime()) {
-      return {}; 
-    }
-
-    return { notEarlierThan, notLaterThan };
-  } catch (e) {
-    console.error("Temporal parsing failed", e);
-  }
-  return {};
 }
 
 // ============================================================================
@@ -431,15 +290,12 @@ export async function assertEdge(
   predicateId: string, 
   category: "SEMANTIC" | "STRUCTURAL" | "LINEAGE",
   temporalInput?: string | null,
-  role?: string | null,
   sortOrder?: number | null,
-  properties?: Record<string, any> // NEW: Supports arbitrary edge metadata like locators!
+  properties?: Record<string, any>
 ) {
   if (sourceId === targetId) throw new Error("Nodes cannot be related to themselves.");
 
   const bounds = parseFuzzyTemporal(temporalInput);
-
-  // Enforce predictable ordering for symmetric relationships in the database
   const [pred] = await db.select().from(predicates).where(eq(predicates.id, predicateId));
   
   let finalSource = sourceId;
@@ -458,11 +314,11 @@ export async function assertEdge(
     temporalInput: temporalInput || null,
     notEarlierThan: bounds.notEarlierThan || null,
     notLaterThan: bounds.notLaterThan || null,
-    role: role || null,
+    role: null, // Hardcoded to satisfy schema, removed from UX
     properties: properties || {},
     sourceSortOrder: sortOrder || 999,
     targetSortOrder: sortOrder || 999,
-    assertedBy: 'system', // Placeholder until Auth is added
+    assertedBy: 'system', 
     isActive: true,
     retractedAt: null, 
   });
@@ -471,33 +327,24 @@ export async function assertEdge(
 }
 
 export async function retractEdge(edgeId: string) {
-  // Edge retraction is already implemented as a soft-delete (update)
   await db.update(edges)
     .set({ isActive: false, retractedAt: new Date() })
     .where(eq(edges.id, edgeId));
-
   revalidatePath('/');
 }
 
 export async function updateEdgeProperties(
   edgeId: string, 
   newTemporalInput: string | null, 
-  newRole: string | null,
-  newProperties?: Record<string, any> // Allow updating JSONB properties safely
+  newProperties?: Record<string, any> 
 ) {
   const [existingEdge] = await db.select().from(edges).where(eq(edges.id, edgeId));
-  
-  if (!existingEdge) {
-    throw new Error("Edge not found.");
-  }
+  if (!existingEdge) throw new Error("Edge not found.");
 
   const bounds = parseFuzzyTemporal(newTemporalInput);
-
   const updatedProps = newProperties ? { ...(existingEdge.properties as Record<string, any>), ...newProperties } : existingEdge.properties;
 
-  await db.update(edges)
-    .set({ isActive: false, retractedAt: new Date() })
-    .where(eq(edges.id, edgeId));
+  await db.update(edges).set({ isActive: false, retractedAt: new Date() }).where(eq(edges.id, edgeId));
 
   await db.insert(edges).values({
     sourceId: existingEdge.sourceId,
@@ -507,7 +354,7 @@ export async function updateEdgeProperties(
     temporalInput: newTemporalInput || null,
     notEarlierThan: bounds.notEarlierThan || null,
     notLaterThan: bounds.notLaterThan || null,
-    role: newRole || null,
+    role: null, 
     properties: updatedProps,
     sourceSortOrder: existingEdge.sourceSortOrder,
     targetSortOrder: existingEdge.targetSortOrder,
@@ -527,17 +374,11 @@ export async function getQuickContext(nodeId: string) {
   const connectedEdges = await db
     .select()
     .from(edges)
-    .where(
-      and(
-        eq(edges.isActive, true),
-        or(eq(edges.sourceId, nodeId), eq(edges.targetId, nodeId))
-      )
-    );
+    .where(and(eq(edges.isActive, true), or(eq(edges.sourceId, nodeId), eq(edges.targetId, nodeId))));
 
   if (connectedEdges.length === 0) return [];
 
   const allPreds = await db.select().from(predicates);
-
   const relatedNodeIds = connectedEdges.map(e => e.sourceId === nodeId ? e.targetId : e.sourceId);
   const uniqueNodeIds = Array.from(new Set(relatedNodeIds));
 
@@ -549,7 +390,6 @@ export async function getQuickContext(nodeId: string) {
   return connectedEdges.map(edge => {
     const isSource = edge.sourceId === nodeId;
     const targetNodeId = isSource ? edge.targetId : edge.sourceId;
-    
     const targetNode = relatedNodes.find(n => n.id === targetNodeId);
     const pred = allPreds.find(p => p.id === edge.predicateId);
     
@@ -565,38 +405,11 @@ export async function getQuickContext(nodeId: string) {
 // UX WORKFLOW ACTIONS (Compound Operations)
 // ============================================================================
 
-export async function createPhysicalHolding(
-  identityId: string,
-  label: string,
-  properties: Record<string, any>
-) {
-  const [newNode] = await db.insert(nodes).values({
-    layer: 'INSTANCE',
-    kind: 'PHYSICAL_OBJECT',
-    label,
-    properties,
-    updatedBy: "system_user", 
-  }).returning({ id: nodes.id });
-
-  await db.insert(edges).values({
-    sourceId: newNode.id,
-    targetId: identityId,
-    predicateId: SYSTEM_PREDICATES.CARRIES,
-    category: "STRUCTURAL",
-    assertedBy: 'system_user',
-    isActive: true,
-  });
-
-  revalidatePath('/');
-  return newNode.id;
-}
-
 export async function createDigitalArtifact(
-  targetId: string, // UPDATED: Changed from identityId to targetId (supports [Media] -> CARRIES -> [Physical])
+  targetId: string, 
   label: string,
   kind: string,
   fileData: { fileUrl: string, mimeType: string, fileSize: number, hash: string },
-  role?: string,
   derivedFromId?: string
 ) {
   const formatBytes = (bytes: number) => {
@@ -620,13 +433,12 @@ export async function createDigitalArtifact(
     updatedBy: "system_user", 
   }).returning({ id: nodes.id });
 
-  // Asserts the CARRIES edge to the Target (Identity OR Physical Instance)
   await db.insert(edges).values({
     sourceId: newNode.id,
     targetId: targetId,
     predicateId: SYSTEM_PREDICATES.CARRIES,
     category: "STRUCTURAL",
-    role: role || null,
+    role: null,
     assertedBy: 'system_user',
     isActive: true,
   });
@@ -655,14 +467,13 @@ export async function checkDuplicateArtifact(hash: string) {
   return existing || null;
 }
 
-export async function linkExistingArtifact(targetId: string, instanceId: string, role?: string) {
-  // UPDATED: Reuses an existing Layer 2 Instance by asserting a new CARRIES edge to this specific target
+export async function linkExistingArtifact(targetId: string, instanceId: string) {
   await db.insert(edges).values({
     sourceId: instanceId,
     targetId: targetId,
     predicateId: SYSTEM_PREDICATES.CARRIES,
     category: "STRUCTURAL",
-    role: role || null,
+    role: null,
     assertedBy: 'system_user',
     isActive: true,
   });
@@ -696,9 +507,7 @@ export async function createAndLinkIdentity(label: string, kind: string, sourceI
   revalidatePath('/');
 }
 
-// NEW: Facilitates the Lineage Builder's inheritance trick
 export async function inheritCarriedIdentities(derivativeId: string, originalId: string) {
-  // Find all CARRIES edges where the original acts as the source
   const originalCarries = await db.select().from(edges).where(
     and(
       eq(edges.sourceId, originalId),
@@ -707,14 +516,13 @@ export async function inheritCarriedIdentities(derivativeId: string, originalId:
     )
   );
 
-  // For each one, assert a duplicate structural edge for the derivative
   for (const edge of originalCarries) {
     await db.insert(edges).values({
       sourceId: derivativeId,
       targetId: edge.targetId,
       predicateId: SYSTEM_PREDICATES.CARRIES,
       category: "STRUCTURAL",
-      role: edge.role,
+      role: null,
       properties: edge.properties,
       sourceSortOrder: edge.sourceSortOrder,
       targetSortOrder: edge.targetSortOrder,
