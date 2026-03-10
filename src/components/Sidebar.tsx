@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import MediaUploader from "@/components/MediaUploader";
 import { createNode, searchGraphNodes } from "@/app/actions";
+import { getMediaDetails } from "@/lib/mediaUtils";
 
 type Node = {
   id: string;
@@ -78,32 +79,21 @@ export default function Sidebar({
 
   const physicalNodes = filteredNodes.filter((n) => n.layer === "PHYSICAL");
   
-  // Media grouping by Mime Type prefix
+  // Media grouping leveraging our centralized utility
   const mediaByFormat = filteredNodes
     .filter((n) => n.layer === "MEDIA")
     .reduce((acc, node) => {
-      let format = 'Document';
-      const mime = node.properties?.mimeType || '';
-      if (mime.startsWith('image/')) format = 'Image';
-      else if (mime.startsWith('video/')) format = 'Video';
-      else if (mime.startsWith('audio/')) format = 'Audio';
-      else if (node.properties?.url) format = 'Web Link';
-      else if (node.properties?.youtube_id) format = 'YouTube';
-
-      if (!acc[format]) acc[format] = [];
-      acc[format].push(node);
+      const { format, icon } = getMediaDetails(node.properties);
+      
+      if (!acc[format]) acc[format] = { icon, nodes: [] };
+      acc[format].nodes.push(node);
       return acc;
-    }, {} as Record<string, Node[]>);
+    }, {} as Record<string, { icon: string, nodes: Node[] }>);
 
   const getKindDisplay = (kindId: string) => {
     const kindDef = activeKinds?.find(k => k.id === kindId || k.label === kindId);
     if (kindDef) return { label: kindDef.label, icon: kindDef.icon };
     return { label: kindId || 'Unclassified', icon: '🟣' };
-  };
-
-  const getMediaIcon = (format: string) => {
-    const icons: Record<string, string> = { 'Image': '🖼️', 'Video': '🎞️', 'Audio': '🎵', 'Web Link': '🔗', 'YouTube': '📺' };
-    return icons[format] || '📄';
   };
 
   const handleTrack1Submit = async () => {
@@ -273,10 +263,10 @@ export default function Sidebar({
           <h2 className="text-[10px] font-bold text-amber-600 uppercase tracking-widest bg-amber-50 px-2 py-1 rounded w-fit mb-4">
             Digital Media
           </h2>
-          {Object.entries(mediaByFormat).map(([format, nodes]) => (
+          {Object.entries(mediaByFormat).map(([format, { icon, nodes }]) => (
             <div key={format} className="mb-4">
               <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-2 mb-1.5 flex items-center gap-1.5">
-                <span className="text-xs opacity-80">{getMediaIcon(format)}</span> {format}
+                <span className="text-xs opacity-80">{icon}</span> {format}
               </h3>
               <ul className="space-y-0.5">
                 {nodes.map((node) => (

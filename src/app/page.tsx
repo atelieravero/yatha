@@ -1,10 +1,10 @@
-import { eq, or, and } from "drizzle-orm";
+import { eq, or, and, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { nodes, edges, SYSTEM_PREDICATES } from "@/db/schema";
 import { getSecureMediaUrl, getRecentNodes, getAllKinds, seedSystemPredicates, getAllPredicates } from "@/app/actions";
+import { getMediaDetails } from "@/lib/mediaUtils";
 import MediaUploader from "@/components/MediaUploader";
 import UniversalBuilder from "@/components/UniversalBuilder";
-import EdgeRetractButton from "@/components/EdgeRetractButton";
 import PropertiesEditor from "@/components/PropertiesEditor";
 import NodeClassification from "@/components/NodeClassification";
 import AliasEditor from "@/components/AliasEditor";
@@ -73,23 +73,46 @@ export default async function Home({
     return (weightA ?? 999) - (weightB ?? 999);
   });
 
-  const allNodes = await getRecentNodes();
+  // ============================================================================
+  // PAGINATION BLINDSPOT FIX
+  // Ensure we explicitly fetch the exact nodes connected via edges, 
+  // bypassing the getRecentNodes 50-item limit.
+  // ============================================================================
+  const connectedNodeIds = new Set<string>();
+  connectedEdges.forEach(e => {
+    connectedNodeIds.add(e.sourceId);
+    connectedNodeIds.add(e.targetId);
+  });
+  connectedNodeIds.add(nodeId);
+
+  let edgeNodes: any[] = [];
+  if (connectedNodeIds.size > 0) {
+    edgeNodes = await db.select().from(nodes).where(inArray(nodes.id, Array.from(connectedNodeIds)));
+  }
+
+  const recentNodes = await getRecentNodes();
+  
+  // Merge recent nodes with explicitly required edge nodes to form the complete dictionary
+  const allNodesMap = new Map();
+  recentNodes.forEach(n => allNodesMap.set(n.id, n));
+  edgeNodes.forEach(n => allNodesMap.set(n.id, n));
+  const allNodes = Array.from(allNodesMap.values());
+  // ============================================================================
+
   const allPredicates = await getAllPredicates();
   const allKinds = await getAllKinds();
   const activeKinds = allKinds.filter(k => k.isActive);
 
   const nodeProps = (activeNode.properties as Record<string, any>) || {};
-  const hasFile = !!nodeProps.fileUrl;
   
-  const mimeType = nodeProps.mimeType || '';
-  const isImage = mimeType.startsWith('image/');
-  const isVideo = mimeType.startsWith('video/');
-  const isAudio = mimeType.startsWith('audio/');
-  const isYouTube = !!nodeProps.youtube_id;
-  const isWebLink = !!nodeProps.url;
+  // Centralized media parsing logic
+  const { isImage, isVideo, isAudio, isYouTube, isWebLink, ytId, webUrl } = getMediaDetails(nodeProps);
+
+  // Prevent rendering the Upload box if we have a valid fileUrl OR an external link
+  const hasFile = !!nodeProps.fileUrl || isYouTube || isWebLink;
 
   let secureViewUrl = "";
-  if (hasFile && !isWebLink && !isYouTube) {
+  if (nodeProps.fileUrl && !isWebLink && !isYouTube) {
     try {
       const filename = nodeProps.fileUrl.split('/').pop();
       if (filename) secureViewUrl = await getSecureMediaUrl(filename);
@@ -109,13 +132,16 @@ export default async function Home({
   if (peekId) {
     peekNode = allNodes.find(n => n.id === peekId);
     const peekProps = (peekNode?.properties as Record<string, any>) || {};
-    const peekIsWeb = !!peekProps.url || !!peekProps.youtube_id;
+    
+    // Centralized media parsing logic for the peeked node
+    const peekMedia = getMediaDetails(peekProps);
+    const peekIsWeb = peekMedia.isWebLink || peekMedia.isYouTube;
     
     if (peekNode && peekProps.fileUrl && !peekIsWeb) {
       const filename = peekProps.fileUrl.split('/').pop();
       if (filename) securePeekUrl = await getSecureMediaUrl(filename);
     } else if (peekIsWeb) {
-      securePeekUrl = peekProps.fileUrl || peekProps.url; 
+      securePeekUrl = peekMedia.webUrl || peekProps.hash; 
     }
   }
 
@@ -175,7 +201,7 @@ export default async function Home({
     <div className="max-w-4xl mx-auto p-8 md:p-12 pb-32">
       
       {/* 1. HEADER */}
-      <div className="mb-6">
+      <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">
           <NodeClassification 
             nodeId={activeNode.id}
@@ -186,26 +212,27 @@ export default async function Home({
           <span className="text-gray-400 font-mono text-xs">{activeNode.id}</span>
         </div>
         
-        <div className="flex justify-between items-start">
-          <NodeLabelEditor nodeId={activeNode.id} initialLabel={activeNode.label} />
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <NodeLabelEditor nodeId={activeNode.id} initialLabel={activeNode.label} />
+            <AliasEditor nodeId={activeNode.id} initialAliases={activeNode.aliases || []} />
+          </div>
           <NodeHistoryViewer nodeId={activeNode.id} />
         </div>
-        
-        <AliasEditor nodeId={activeNode.id} initialAliases={activeNode.aliases || []} />
       </div>
 
-      {/* 2. BRIDGED CONCEPT BLOCK (Physical/Media Only) */}
-      {!isIdentity && (
+      {/* 2a. BRIDGED CONCEPTS BLOCK (Physical & Media Only) */}
+      {(isPhysical || isMedia) && (
         <section className="mb-6 bg-white p-5 border border-blue-200 rounded-xl shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-4 border-b border-blue-100 pb-3 mb-4">
-             <h2 className="text-sm font-bold text-blue-900 flex items-center gap-2"><span>💡</span> Bridged Concept</h2>
-             <UniversalBuilder 
-               sourceNode={activeNode} allNodes={allNodes as any} activeKinds={activeKinds}
-               config={{
-                 mode: 'STRUCTURAL', direction: 'FORWARD', allowedGateways: ['IDENTITY'],
-                 buttonLabel: 'Link Concept', modalTitle: 'Bridged Concept', icon: '💡', theme: 'blue', hideEdgeProperties: true
-               }}
-             />
+            <h2 className="text-sm font-bold text-blue-900 flex items-center gap-2"><span>💡</span> Bridged Concept</h2>
+            <UniversalBuilder 
+              sourceNode={activeNode} allNodes={allNodes as any} activeKinds={activeKinds}
+              config={{
+                mode: 'STRUCTURAL', direction: 'FORWARD', allowedGateways: ['IDENTITY'],
+                buttonLabel: 'Link Concept', modalTitle: 'Bridged Concept', icon: '💡', theme: 'blue', hideEdgeProperties: true
+              }}
+            />
           </div>
           <div className="space-y-2">
             {bridgedConcepts.length === 0 ? (
@@ -220,7 +247,7 @@ export default async function Home({
               <EdgeRow 
                 key={item.edge.id} edge={item.edge} node={item.node} isSource={item.isSource} 
                 predDef={allPredicates.find(p => p.id === item.edge.predicateId) || { forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} 
-                currentTab={currentTab} activeNodeId={activeNode.id} activeKinds={activeKinds} hideEdit={true}
+                currentTab={currentTab} activeNodeId={activeNode.id} activeKinds={activeKinds} hideEdit={true} hideBadge={true}
               />
             ))}
           </div>
@@ -253,7 +280,7 @@ export default async function Home({
               <EdgeRow 
                 key={item.edge.id} edge={item.edge} node={item.node} isSource={item.isSource} 
                 predDef={allPredicates.find(p => p.id === item.edge.predicateId) || { forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} 
-                currentTab={currentTab} activeNodeId={activeNode.id} activeKinds={activeKinds} hideEdit={true}
+                currentTab={currentTab} activeNodeId={activeNode.id} activeKinds={activeKinds} hideEdit={true} hideBadge={true}
               />
             ))}
           </div>
@@ -266,11 +293,11 @@ export default async function Home({
           {hasFile ? (
             <div className="rounded bg-gray-100 overflow-hidden flex items-center justify-center min-h-[300px]">
               {isYouTube ? (
-                <iframe className="w-full max-w-2xl aspect-video rounded shadow-sm m-4" src={`https://www.youtube.com/embed/${nodeProps.youtube_id}`} allowFullScreen></iframe>
+                <iframe className="w-full max-w-2xl aspect-video rounded shadow-sm m-4" src={`https://www.youtube.com/embed/${ytId}`} allowFullScreen></iframe>
               ) : isWebLink ? (
                 <div className="p-8 text-center flex flex-col items-center gap-4">
                   <span className="text-5xl block mb-2">🔗</span>
-                  <a href={nodeProps.url} target="_blank" rel="noopener noreferrer" className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm">Open Web Link ↗</a>
+                  <a href={webUrl} target="_blank" rel="noopener noreferrer" className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm">Open Web Link ↗</a>
                 </div>
               ) : secureViewUrl ? (
                 isImage ? <img src={secureViewUrl} alt={activeNode.label} className="max-h-[500px] object-contain" />
@@ -320,7 +347,9 @@ export default async function Home({
            <UniversalBuilder 
              sourceNode={activeNode} allNodes={allNodes as any} activeKinds={activeKinds} allPredicates={allPredicates}
              config={{
-               mode: 'SEMANTIC', direction: 'FORWARD', allowedGateways: ['IDENTITY', 'PHYSICAL', 'FILE', 'URL'],
+               mode: 'SEMANTIC', // REMOVED: direction
+               // Rule: Identity can't use Media in this block (uses Appearances tab instead). Physical can't use Physical. Media can't use Media.
+               allowedGateways: isIdentity ? ['IDENTITY', 'PHYSICAL'] : (isPhysical ? ['IDENTITY', 'FILE', 'URL'] : ['IDENTITY', 'PHYSICAL']),
                buttonLabel: 'Assert Link', modalTitle: 'Semantic Connection', icon: '🔗', theme: 'emerald', hideEdgeProperties: false
              }}
            />
@@ -370,7 +399,8 @@ export default async function Home({
               <UniversalBuilder 
                  sourceNode={activeNode} allNodes={allNodes as any} activeKinds={activeKinds} allPredicates={allPredicates}
                  config={{
-                   mode: 'SEMANTIC', direction: 'REVERSE', allowedGateways: ['FILE', 'URL'],
+                   mode: 'SEMANTIC', // REMOVED: direction
+                   allowedGateways: ['FILE', 'URL'],
                    buttonLabel: 'Tag in Media', modalTitle: 'Media Appearance', icon: '📸', theme: 'emerald', hideEdgeProperties: false
                  }}
                />

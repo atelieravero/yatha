@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { getQuickContext } from "@/app/actions";
+import { getMediaDetails } from "@/lib/mediaUtils";
 
 export default function PeekDrawer({
   peekNode,
@@ -33,23 +34,20 @@ export default function PeekDrawer({
   if (!peekNode) return null;
 
   // --------------------------------------------------------------------------
-  // 3-LAYER ICON & LABEL ROUTING
+  // 3-LAYER ICON & LABEL ROUTING (Now using shared utility!)
   // --------------------------------------------------------------------------
   let icon = '🟣';
   let label = 'Concept';
+
+  const peekProps = (peekNode?.properties as Record<string, any>) || {};
+  const mediaDetails = getMediaDetails(peekProps);
 
   if (peekNode.layer === 'PHYSICAL') {
     icon = '📦';
     label = 'Physical Item';
   } else if (peekNode.layer === 'MEDIA') {
-    const mime = peekNode.properties?.mimeType || '';
-    const hash = peekNode.properties?.hash || '';
-    if (mime.startsWith('image/')) { icon = '🖼️'; label = 'Image'; }
-    else if (mime.startsWith('video/')) { icon = '🎞️'; label = 'Video'; }
-    else if (mime.startsWith('audio/')) { icon = '🎵'; label = 'Audio'; }
-    else if (peekNode.properties?.url || hash.startsWith('http')) { icon = '🔗'; label = 'Web Link'; }
-    else if (peekNode.properties?.youtube_id || hash.startsWith('youtube:')) { icon = '📺'; label = 'YouTube Video'; }
-    else { icon = '📄'; label = 'Document'; }
+    icon = mediaDetails.icon;
+    label = mediaDetails.format;
   } else {
     const kindDef = activeKinds.find(k => k.id === peekNode.kind);
     if (kindDef) {
@@ -61,28 +59,17 @@ export default function PeekDrawer({
   const closeHref = `/?node=${activeNodeId}&tab=${currentTab}`;
   const focusHref = `/?node=${peekNode.id}`;
   
-  // Format detection for the Media Viewer
-  const mimeType = peekNode.properties?.mimeType || '';
-  const isImage = mimeType.startsWith('image/');
-  const isVideo = mimeType.startsWith('video/');
-  const isAudio = mimeType.startsWith('audio/');
+  // Cleanly resolved booleans from our utility
+  const { isImage, isVideo, isAudio, isYouTube, isWebLink, ytId } = mediaDetails;
   
-  const hash = peekNode.properties?.hash || '';
-  const isYouTube = !!peekNode.properties?.youtube_id || hash.startsWith('youtube:');
-  const isWebLink = !!peekNode.properties?.url || hash.startsWith('http');
-  const ytId = peekNode.properties?.youtube_id || hash.replace('youtube:', '');
-  
-  const propsToDisplay = Object.entries(peekNode.properties || {}).filter(([k]) => k !== 'fileUrl' && k !== 'mimeType' && k !== 'temporal_input' && k !== 'hash');
+  const propsToDisplay = Object.entries(peekProps).filter(([k]) => k !== 'fileUrl' && k !== 'mimeType' && k !== 'temporal_input' && k !== 'hash');
 
   return (
     // The container is transparent to keep the user anchored to their main workspace.
-    <div className="fixed inset-0 z-50 flex justify-end bg-transparent">
+    <div className="fixed inset-0 z-50 flex justify-end bg-transparent pointer-events-none">
       
-      {/* Click outside to close (navigates back to active node's current tab) */}
-      <a href={closeHref} className="absolute inset-0 cursor-default" aria-label="Close drawer" />
-
       {/* Slide-over Panel */}
-      <div className="relative w-full max-w-md h-full bg-white shadow-2xl border-l border-gray-200 flex flex-col animate-in slide-in-from-right duration-300">
+      <div className="relative w-full max-w-md h-full bg-white shadow-2xl border-l border-gray-200 flex flex-col animate-in slide-in-from-right duration-300 pointer-events-auto">
         
         {/* Header */}
         <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">

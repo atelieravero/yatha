@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
-import { assertEdge, createNode, getUploadTicket, attachFileToNode, checkDuplicateArtifact } from "@/app/actions";
+import { assertEdge, createNode, getUploadTicket, attachFileToNode, checkDuplicateArtifact, createPredicate } from "@/app/actions";
 import { SYSTEM_PREDICATES } from "@/db/schema";
 
 type MinimalNode = { id: string; label: string; layer: "IDENTITY" | "PHYSICAL" | "MEDIA"; kind?: string | null; aliases?: string[] };
@@ -14,7 +14,7 @@ export type Gateway = 'IDENTITY' | 'PHYSICAL' | 'FILE' | 'URL';
 
 export interface BuilderConfig {
   mode: BuilderMode;
-  direction: Direction;
+  direction?: Direction; // Made optional! Semantic mode dynamically handles its own direction.
   allowedGateways: Gateway[];
   buttonLabel: string;
   modalTitle: string;
@@ -66,6 +66,12 @@ export default function UniversalBuilder({
   const [temporalInput, setTemporalInput] = useState("");
   const [locator, setLocator] = useState("");
 
+  // Inline Predicate Creator State
+  const [isCreatingPredicate, setIsCreatingPredicate] = useState(false);
+  const [newPredForward, setNewPredForward] = useState("");
+  const [newPredReverse, setNewPredReverse] = useState("");
+  const [isPredSymmetric, setIsPredSymmetric] = useState(false);
+
   const theme = THEMES[config.theme] || THEMES.blue;
 
   // --------------------------------------------------------------------------
@@ -85,18 +91,55 @@ export default function UniversalBuilder({
       setSelectedPredicateId("");
       setTemporalInput("");
       setLocator("");
+      
+      setIsCreatingPredicate(false);
+      setNewPredForward("");
+      setNewPredReverse("");
+      setIsPredSymmetric(false);
     }
   }, [isOpen]);
 
   // --------------------------------------------------------------------------
   // SEARCH FILTERING (Enforcing Graph Physics)
   // --------------------------------------------------------------------------
+  
+  // STRICT GRAPH PHYSICS: Filter requested gateways against reality
+  const effectiveGateways = config.allowedGateways.filter(g => {
+    if (config.mode === 'CONTAINMENT') {
+      if (config.direction === 'REVERSE') {
+        // Identity and Media can only be Contained In an Identity (Collection)
+        if ((sourceNode.layer === 'IDENTITY' || sourceNode.layer === 'MEDIA') && g === 'PHYSICAL') return false;
+      } else {
+        // Physical can only Contain Physical
+        if (sourceNode.layer === 'PHYSICAL' && g !== 'PHYSICAL') return false;
+      }
+    }
+    return true;
+  });
+
   const allowedTargets = allNodes.filter(n => {
     if (n.id === sourceNode.id) return false;
-    if (config.mode === 'SEMANTIC') return true; // Semantic connects to anything
-    if (n.layer === 'IDENTITY' && config.allowedGateways.includes('IDENTITY')) return true;
-    if (n.layer === 'PHYSICAL' && config.allowedGateways.includes('PHYSICAL')) return true;
-    if (n.layer === 'MEDIA' && (config.allowedGateways.includes('FILE') || config.allowedGateways.includes('URL'))) return true;
+
+    // Strict Graph Physics: Prevent peer-to-peer semantics on the Instance layer
+    if (config.mode === 'SEMANTIC') {
+      if (sourceNode.layer === 'PHYSICAL' && n.layer === 'PHYSICAL') return false;
+      if (sourceNode.layer === 'MEDIA' && n.layer === 'MEDIA') return false;
+    }
+
+    // Strict Graph Physics: Containment Layering
+    if (config.mode === 'CONTAINMENT') {
+      if (config.direction === 'REVERSE') {
+        if ((sourceNode.layer === 'IDENTITY' || sourceNode.layer === 'MEDIA') && n.layer === 'PHYSICAL') return false;
+      } else {
+        if (sourceNode.layer === 'PHYSICAL' && n.layer !== 'PHYSICAL') return false;
+      }
+    }
+
+    // Strictly respect the physics-validated effectiveGateways
+    if (n.layer === 'IDENTITY' && effectiveGateways.includes('IDENTITY')) return true;
+    if (n.layer === 'PHYSICAL' && effectiveGateways.includes('PHYSICAL')) return true;
+    if (n.layer === 'MEDIA' && (effectiveGateways.includes('FILE') || effectiveGateways.includes('URL'))) return true;
+    
     return false;
   });
 
@@ -117,9 +160,9 @@ export default function UniversalBuilder({
   // WORKFLOW HANDLERS
   // --------------------------------------------------------------------------
   
-  const proceedToPropertiesOrExecute = () => {
+  const proceedToPropertiesOrExecute = (overrideTargetId?: string) => {
     if (config.hideEdgeProperties) {
-      executeGraphMutation();
+      executeGraphMutation(overrideTargetId);
     } else {
       setStep('PROPERTIES');
     }
@@ -127,12 +170,12 @@ export default function UniversalBuilder({
 
   const handleSelectExisting = (id: string) => {
     setTargetId(id);
-    proceedToPropertiesOrExecute();
+    proceedToPropertiesOrExecute(id); // Pass the ID directly so we don't rely on async state!
   };
 
   const handleCreateNewClick = () => {
-    if (config.allowedGateways.length === 1) {
-      setActiveGateway(config.allowedGateways[0]);
+    if (effectiveGateways.length === 1) {
+      setActiveGateway(effectiveGateways[0]);
       setMintLabel(searchTerm);
       setStep('FORM');
     } else {
@@ -182,27 +225,47 @@ export default function UniversalBuilder({
     }
   };
 
-  const executeGraphMutation = () => {
+  const handleCreatePredicate = () => {
+    if (!newPredForward.trim() || (!isPredSymmetric && !newPredReverse.trim())) return;
+    
+    startTransition(async () => {
+      const forward = newPredForward.toLowerCase().trim();
+      const reverse = isPredSymmetric ? forward : newPredReverse.toLowerCase().trim();
+      
+      // Fire action and receive the new UUID
+      const newId = await createPredicate(forward, reverse, isPredSymmetric);
+      
+      if (newId) {
+        // Auto-select the newly minted predicate so they can instantly hit "Save Link"
+        setSelectedPredicateId(newId);
+      }
+
+      setIsCreatingPredicate(false);
+      setNewPredForward("");
+      setNewPredReverse("");
+      setIsPredSymmetric(false);
+    });
+  };
+
+  const executeGraphMutation = (overrideTargetId?: string) => {
     startTransition(async () => {
       setStep('EXECUTING');
-      let finalTargetId = targetId;
+      let finalTargetId = overrideTargetId || targetId; // Use the override if provided!
 
-      // Phase 1: MINTING (If we didn't select an existing node)
+      // Phase 1: MINTING (Only if targetId is NOT set. This fixes the dedupe bug!)
       if (!finalTargetId && activeGateway) {
         if (activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') {
           finalTargetId = await createNode(mintLabel.trim(), activeGateway, activeGateway === 'IDENTITY' ? mintKind : null);
         } 
         else if (activeGateway === 'FILE' && file) {
-          const kind = file.type.startsWith('video/') ? 'VIDEO' : file.type.startsWith('audio/') ? 'AUDIO' : 'IMAGE';
           finalTargetId = await createNode(mintLabel.trim() || file.name, "MEDIA", null);
           const { uploadUrl, fileUrl } = await getUploadTicket(file.name, file.type);
-          if (uploadUrl !== 'mock') {
+          if (uploadUrl && uploadUrl !== 'mock') {
             await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
           }
           await attachFileToNode(finalTargetId, fileUrl, file.type, file.size, payloadHash);
         } 
         else if (activeGateway === 'URL') {
-          const kind = payloadHash.startsWith('youtube:') ? 'YOUTUBE_VIDEO' : 'WEB_LINK';
           finalTargetId = await createNode(mintLabel.trim(), "MEDIA", null);
           await attachFileToNode(finalTargetId, payloadHash.startsWith('youtube:') ? '' : mintLabel.trim(), 'text/html', 0, payloadHash);
         }
@@ -214,7 +277,9 @@ export default function UniversalBuilder({
       let edgeSource = sourceNode.id;
       let edgeTarget = finalTargetId;
       
-      if (config.direction === "REVERSE") {
+      // FIX: Semantic mode dictates its own direction via the verb selection (_REV).
+      // Applying the structural config.direction here caused a "double flip" bug.
+      if (config.direction === "REVERSE" && config.mode !== 'SEMANTIC') {
         edgeSource = finalTargetId;
         edgeTarget = sourceNode.id;
       }
@@ -223,16 +288,30 @@ export default function UniversalBuilder({
       if (config.mode === 'CONTAINMENT') finalPredicate = SYSTEM_PREDICATES.CONTAINS;
       if (config.mode === 'SEMANTIC') finalPredicate = selectedPredicateId;
 
+      // -------------------------------------------------------------
+      // Handle Reverse Semantic Predicates (_REV tag from UI)
+      // -------------------------------------------------------------
+      if (config.mode === 'SEMANTIC' && finalPredicate.endsWith('_REV')) {
+        finalPredicate = finalPredicate.replace('_REV', '');
+        // Flip the directional arrow since the user chose the reverse reading
+        const temp = edgeSource;
+        edgeSource = edgeTarget;
+        edgeTarget = temp;
+      }
+      // -------------------------------------------------------------
+
       const edgeProperties = locator.trim() ? { locator: locator.trim() } : {};
 
+      // FIX: Ensure parameters map strictly to actions.ts signature.
+      // assertEdge(sourceId, targetId, predicateId, category, temporalInput, sortOrder, properties)
       await assertEdge(
         edgeSource,
         edgeTarget,
         finalPredicate,
         config.mode,
         temporalInput || null,
-        999, // default sort
-        edgeProperties
+        999, // Map sorting weight correctly to the 6th parameter
+        edgeProperties // Map properties cleanly to the 7th parameter
       );
 
       setIsOpen(false);
@@ -318,28 +397,28 @@ export default function UniversalBuilder({
           <div className="animate-in slide-in-from-right-2">
             <label className="block text-[10px] font-bold text-gray-500 uppercase mb-2">What kind of record are you creating?</label>
             <div className="grid grid-cols-2 gap-2">
-              {config.allowedGateways.includes('IDENTITY') && (
+              {effectiveGateways.includes('IDENTITY') && (
                 <button onClick={() => { setActiveGateway('IDENTITY'); setMintLabel(searchTerm); setStep('FORM'); }} className="p-3 border border-gray-200 bg-white rounded-lg hover:border-blue-300 hover:bg-blue-50 text-left transition-colors">
                   <span className="block text-xl mb-1">🟣</span>
                   <span className="font-bold text-xs text-gray-900 block">Abstract Concept</span>
                   <span className="text-[10px] text-gray-500">People, works, events</span>
                 </button>
               )}
-              {config.allowedGateways.includes('PHYSICAL') && (
+              {effectiveGateways.includes('PHYSICAL') && (
                 <button onClick={() => { setActiveGateway('PHYSICAL'); setMintLabel(searchTerm); setStep('FORM'); }} className="p-3 border border-gray-200 bg-white rounded-lg hover:border-amber-300 hover:bg-amber-50 text-left transition-colors">
                   <span className="block text-xl mb-1">📦</span>
                   <span className="font-bold text-xs text-gray-900 block">Physical Item</span>
                   <span className="text-[10px] text-gray-500">Tangible objects/boxes</span>
                 </button>
               )}
-              {config.allowedGateways.includes('FILE') && (
+              {effectiveGateways.includes('FILE') && (
                 <button onClick={() => { setActiveGateway('FILE'); setStep('FORM'); }} className="p-3 border border-gray-200 bg-white rounded-lg hover:border-emerald-300 hover:bg-emerald-50 text-left transition-colors">
                   <span className="block text-xl mb-1">📄</span>
                   <span className="font-bold text-xs text-gray-900 block">Upload File</span>
                   <span className="text-[10px] text-gray-500">Images, videos, PDFs</span>
                 </button>
               )}
-              {config.allowedGateways.includes('URL') && (
+              {effectiveGateways.includes('URL') && (
                 <button onClick={() => { setActiveGateway('URL'); setStep('FORM'); }} className="p-3 border border-gray-200 bg-white rounded-lg hover:border-blue-300 hover:bg-blue-50 text-left transition-colors">
                   <span className="block text-xl mb-1">🔗</span>
                   <span className="font-bold text-xs text-gray-900 block">Web URL</span>
@@ -406,21 +485,21 @@ export default function UniversalBuilder({
                 <p className="text-xs font-bold text-amber-800 mb-1 flex items-center gap-1"><span>⚠️</span> Exact Match Found</p>
                 <p className="text-[10px] text-amber-700 mb-3">"{duplicateFound.label}" already exists in the graph.</p>
                 <div className="flex gap-2">
-                  <button onClick={() => handleSelectExisting(duplicateFound.id)} className="flex-1 py-1.5 bg-amber-600 text-white text-xs font-bold rounded shadow-sm hover:bg-amber-700">Use Existing</button>
+                  <button onClick={() => handleSelectExisting(duplicateFound.id)} className="flex-1 py-1.5 bg-amber-600 text-white text-xs font-bold rounded shadow-sm hover:bg-amber-700 cursor-pointer">Use Existing</button>
                   {(activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
-                    <button onClick={proceedToPropertiesOrExecute} className="flex-1 py-1.5 bg-white text-amber-700 border border-amber-200 text-xs font-bold rounded shadow-sm hover:bg-amber-100">Mint Duplicate</button>
+                    <button onClick={() => proceedToPropertiesOrExecute()} className="flex-1 py-1.5 bg-white text-amber-700 border border-amber-200 text-xs font-bold rounded shadow-sm hover:bg-amber-100 cursor-pointer">Mint Duplicate</button>
                   )}
                 </div>
               </div>
             )}
 
             <div className="flex justify-between items-center mt-5 pt-3 border-t border-gray-100">
-              <button onClick={() => setStep(config.allowedGateways.length === 1 ? 'SEARCH' : 'GATEWAY')} className="text-xs text-gray-500 hover:underline">← Back</button>
+              <button onClick={() => setStep(effectiveGateways.length === 1 ? 'SEARCH' : 'GATEWAY')} className="text-xs text-gray-500 hover:underline cursor-pointer">← Back</button>
               {!duplicateFound && (
                 <button 
                   onClick={processFormSubmit} 
                   disabled={(activeGateway === 'IDENTITY' && (!mintLabel || !mintKind)) || (activeGateway === 'PHYSICAL' && !mintLabel) || (activeGateway === 'FILE' && !file) || (activeGateway === 'URL' && !mintLabel)}
-                  className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded shadow-sm disabled:opacity-50"
+                  className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded shadow-sm disabled:opacity-50 cursor-pointer"
                 >
                   Continue →
                 </button>
@@ -433,19 +512,81 @@ export default function UniversalBuilder({
         {step === 'PROPERTIES' && (
           <div className="animate-in slide-in-from-right-2 p-4 bg-white border border-gray-200 rounded-md shadow-sm">
              {config.mode === 'SEMANTIC' && (
-                <div className="mb-4 pb-4 border-b border-gray-100">
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Select Connection Verb</label>
-                  <select 
-                    value={selectedPredicateId} 
-                    onChange={e => setSelectedPredicateId(e.target.value)}
-                    className="w-full p-2 text-sm border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="">Select predicate...</option>
-                    {allPredicates?.filter(p => !p.isSystem && p.isActive).flatMap(p => p.isSymmetric ? [{ v: p.id, l: p.forwardLabel }] : [{ v: p.id, l: p.forwardLabel }, { v: `${p.id}_REV`, l: p.reverseLabel }]).map(opt => (
-                      <option key={opt.v} value={opt.v}>{opt.l}</option>
-                    ))}
-                  </select>
-                </div>
+                isCreatingPredicate ? (
+                  <div className="mb-4 pb-4 border-b border-gray-100 animate-in fade-in slide-in-from-top-1">
+                    <div className="font-medium text-gray-700 mb-3 flex justify-between items-center">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-gray-800">✨ Define New Semantic Pair</span>
+                      <button onClick={() => setIsCreatingPredicate(false)} className="text-gray-400 hover:text-gray-800 cursor-pointer">✕</button>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex gap-2 items-center">
+                        <span className="w-16 text-gray-500 text-[10px] font-bold text-right uppercase">Forward</span>
+                        <input 
+                          type="text" placeholder="e.g. influenced by" 
+                          value={newPredForward} onChange={e => setNewPredForward(e.target.value)}
+                          disabled={isPending}
+                          className="p-1.5 text-sm border border-gray-300 rounded text-gray-900 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                        />
+                      </div>
+                      <div className="flex gap-2 items-center sm:ml-18">
+                        <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer font-medium">
+                          <input 
+                            type="checkbox" 
+                            checked={isPredSymmetric} 
+                            onChange={e => setIsPredSymmetric(e.target.checked)} 
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 cursor-pointer"
+                          />
+                          Is symmetric (e.g. "married to")
+                        </label>
+                      </div>
+                      {!isPredSymmetric && (
+                        <div className="flex gap-2 items-center animate-in fade-in">
+                          <span className="w-16 text-gray-500 text-[10px] font-bold text-right uppercase">Reverse</span>
+                          <input 
+                            type="text" placeholder="e.g. influence on" 
+                            value={newPredReverse} onChange={e => setNewPredReverse(e.target.value)}
+                            disabled={isPending}
+                            className="p-1.5 text-sm border border-gray-300 rounded text-gray-900 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                          />
+                        </div>
+                      )}
+                      <div className="flex gap-2 sm:ml-18 pt-2">
+                        <button 
+                          onClick={handleCreatePredicate} 
+                          disabled={isPending || !newPredForward.trim() || (!isPredSymmetric && !newPredReverse.trim())}
+                          className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded hover:bg-blue-700 shadow-sm disabled:opacity-50 cursor-pointer"
+                        >
+                          {isPending ? "Saving..." : "Save Pair to Dictionary"}
+                        </button>
+                        <button 
+                          onClick={() => setIsCreatingPredicate(false)} 
+                          disabled={isPending}
+                          className="px-3 py-1.5 text-gray-500 text-xs hover:text-gray-800 cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-4 pb-4 border-b border-gray-100">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Select Connection Verb</label>
+                    <select 
+                      value={selectedPredicateId} 
+                      onChange={e => {
+                        if (e.target.value === "CREATE_NEW") setIsCreatingPredicate(true);
+                        else setSelectedPredicateId(e.target.value);
+                      }}
+                      className="w-full p-2 text-sm border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    >
+                      <option value="">Select predicate...</option>
+                      {allPredicates?.filter(p => !p.isSystem && p.isActive).flatMap(p => p.isSymmetric ? [{ v: p.id, l: p.forwardLabel }] : [{ v: p.id, l: p.forwardLabel }, { v: `${p.id}_REV`, l: p.reverseLabel }]).map(opt => (
+                        <option key={opt.v} value={opt.v}>{opt.l}</option>
+                      ))}
+                      <option value="CREATE_NEW" className="font-bold text-blue-600">+ Create new semantic pair...</option>
+                    </select>
+                  </div>
+                )
              )}
 
              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
@@ -460,11 +601,11 @@ export default function UniversalBuilder({
              </div>
 
              <div className="flex justify-between items-center pt-3 border-t border-gray-100">
-                <button onClick={() => setStep(targetId ? 'SEARCH' : 'FORM')} className="text-xs text-gray-500 hover:underline">← Back</button>
+                <button onClick={() => setStep(targetId ? 'SEARCH' : 'FORM')} className="text-xs text-gray-500 hover:underline cursor-pointer">← Back</button>
                 <button 
-                  onClick={executeGraphMutation} 
-                  disabled={config.mode === 'SEMANTIC' && !selectedPredicateId}
-                  className={`px-5 py-2 text-xs font-bold uppercase tracking-widest rounded shadow-sm ${theme.button}`}
+                  onClick={() => executeGraphMutation()} 
+                  disabled={config.mode === 'SEMANTIC' && (!selectedPredicateId || isCreatingPredicate)}
+                  className={`px-5 py-2 text-xs font-bold uppercase tracking-widest rounded shadow-sm disabled:opacity-50 cursor-pointer ${theme.button}`}
                 >
                   Save Link
                 </button>

@@ -5,9 +5,13 @@
 ## 1. Tech Stack & Environment
 
 * Next.js App Router (`force-dynamic` extensively used).
+
 * PostgreSQL + Drizzle ORM.
+
 * Tailwind CSS.
+
 * **Server Actions ONLY:** All database mutations happen via `actions.ts`. No API routes (`/api/...`).
+
 * **Direct-to-S3 Uploads:** Files are NEVER uploaded to the Next.js server. The server issues presigned Cloudflare R2 URLs, and the client browser `PUT`s the file directly to storage.
 
 ## 2. The 3-Layer Ontology (CRITICAL)
@@ -15,8 +19,10 @@
 The database `nodes` table has a strict `layer` column:
 
 1. `IDENTITY`: Abstract concepts (People, Artworks, Ideas). Uses the `kind` column to map to a user-defined dictionary taxonomy.
+
 2. `PHYSICAL`: Tangible custody tokens (Boxes, Books). The `kind` column MUST BE `NULL`.
-3. `MEDIA`: Digital files and URLs. The `kind` column MUST BE `NULL`. Render UI based on `properties.mimeType`.
+
+3. `MEDIA`: Digital files and URLs. The `kind` column MUST BE `NULL`. Render UI based on `properties.mimeType` and `properties.hash`.
 
 *Anti-Pattern:* Never use strings like `PHYSICAL_OBJECT` or `IMAGE` in the `kind` column.
 
@@ -24,13 +30,16 @@ The database `nodes` table has a strict `layer` column:
 
 Edges strictly govern relationships.
 
-* **`CARRIES` (Structural):** * `[PHYSICAL | MEDIA] -> CARRIES -> [IDENTITY]` (Bridges an artifact to its conceptual meaning).
+* **`CARRIES` (Structural):** \* `[PHYSICAL | MEDIA] -> CARRIES -> [IDENTITY]` (Bridges an artifact to its conceptual meaning).
+
   * `[MEDIA] -> CARRIES -> [PHYSICAL]` (A digital file carries the representation of a specific physical item).
 
-* **`CONTAINS` (Aggregation):** * `[PHYSICAL] -> CONTAINS -> [PHYSICAL]`
+* **`CONTAINS` (Aggregation):** \* `[PHYSICAL] -> CONTAINS -> [PHYSICAL]`
+
   * `[IDENTITY] -> CONTAINS -> [ANY]`
 
-* **Semantics (User Defined):** * **Legal:** `IDENTITY <-> IDENTITY`, `IDENTITY <-> PHYSICAL`, `IDENTITY <-> MEDIA`, `PHYSICAL <-> MEDIA`.
+* **Semantics (User Defined):** \* **Legal:** `IDENTITY <-> IDENTITY`, `IDENTITY <-> PHYSICAL`, `IDENTITY <-> MEDIA`, `PHYSICAL <-> MEDIA`.
+
   * **Forbidden:** `PHYSICAL <-> PHYSICAL` and `MEDIA <-> MEDIA` (Do not link peers of the same tangible/digital layer via semantics; use `CONTAINS` or link them conceptually instead to prevent graph hairballs).
 
 *Note:* `LINEAGE` (`DERIVED_FROM`) and `REFERENCES` are DEPRECATED. Do not use them.
@@ -40,18 +49,24 @@ Edges strictly govern relationships.
 Do not create bespoke modals for creating edges. ALL edge creation must flow through `<UniversalBuilder />` in `src/components/UniversalBuilder.tsx`.
 It accepts a strict `config` object:
 
-```typescript
+```
 interface BuilderConfig {
   mode: 'STRUCTURAL' | 'CONTAINMENT' | 'SEMANTIC';
-  direction: 'FORWARD' | 'REVERSE';
+  direction?: 'FORWARD' | 'REVERSE'; // Optional. Omit for SEMANTIC modes!
   allowedGateways: ('IDENTITY' | 'PHYSICAL' | 'FILE' | 'URL')[]; // The 4 Creation Doors
   // ... ui props
 }
+
 ```
 
-* **Soft Dedupe:** If a user types a name matching an existing `IDENTITY` or `PHYSICAL` node, the Builder intercepts and asks them to verify.
+* **Strict Internal Physics:** The Builder intercepts the `allowedGateways` prop and filters them against reality using an `effectiveGateways` matrix. (e.g., if a parent component blindly requests a `PHYSICAL` door for a `CONTAINS` target on a `MEDIA` node, the Builder will actively hide it to prevent database corruption).
+
+* **Semantic Direction:** For `mode: 'SEMANTIC'`, the `direction` parameter is omitted entirely. The UI acts as a natural language sentence builder, and the exact directional arrow is dictated strictly by the user's verb selection (Forward vs. Reverse tag).
+
+* **Soft Dedupe:** If a user types a name matching an existing `IDENTITY` or `PHYSICAL` node, the Builder asks them to verify.
+
 * **Hard Dedupe:** Media files are hashed locally (SHA-256) before upload. If the hash matches an existing `MEDIA` node, the system *forces* a link to the existing node.
 
 ## 5. Event Sourcing & Safety
 
-Every destructive update to a node (`updateNodeProperties`, `updateNodeLabel`) must call `captureNodeSnapshot(nodeId)` FIRST. This inserts the previous state into `node_history`, allowing users to rewind time. Never execute an `UPDATE` on `nodes` without capturing the snapshot.
+Every destructive update to a node (`updateNodeProperties`, `updateNodeLabel`) must call `captureNodeSnapshot(nodeId)` FIRST. This inserts the previous state into `node_history`, allowing users to rewind time. Never execute an `UPDATE` on `nodes` without capturing the snapshot

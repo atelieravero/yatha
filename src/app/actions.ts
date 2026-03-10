@@ -151,10 +151,16 @@ export async function seedSystemPredicates() {
 }
 
 export async function createPredicate(forwardLabel: string, reverseLabel: string, isSymmetric: boolean) {
-  await db.insert(predicates).values({
-    forwardLabel, reverseLabel: isSymmetric ? forwardLabel : reverseLabel, isSymmetric, isSystem: false, isActive: true,
-  });
+  const [newPred] = await db.insert(predicates).values({
+    forwardLabel, 
+    reverseLabel: isSymmetric ? forwardLabel : reverseLabel, 
+    isSymmetric, 
+    isSystem: false, 
+    isActive: true,
+  }).returning({ id: predicates.id }); // FIX: Return the ID so the UI can auto-select it!
+  
   revalidatePath('/');
+  return newPred.id;
 }
 
 export async function updatePredicate(id: string, forwardLabel: string, reverseLabel: string, isSymmetric: boolean) {
