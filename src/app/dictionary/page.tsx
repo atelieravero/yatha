@@ -9,9 +9,11 @@ export default async function DictionaryPage() {
   const allKinds = await db.select().from(kinds).orderBy(kinds.label);
   const allNodes = await db.select({ kind: nodes.kind }).from(nodes);
 
-  // Aggregate node counts per kind
+  // Aggregate node counts per kind (ignoring nulls from physical/media items)
   const nodeCounts = allNodes.reduce((acc, node) => {
-    acc[node.kind] = (acc[node.kind] || 0) + 1;
+    if (node.kind) {
+      acc[node.kind] = (acc[node.kind] || 0) + 1;
+    }
     return acc;
   }, {} as Record<string, number>);
 
