@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { signOut } from "next-auth/react";
 import { createNode, searchGraphNodes, checkDuplicateArtifact, getUploadTicket, attachFileToNode } from "@/app/actions";
 import { getMediaDetails } from "@/lib/mediaUtils";
 
@@ -18,10 +19,14 @@ type Kind = { id: string; label: string; icon: string; };
 
 export default function Sidebar({ 
   initialNodes = [],
-  activeKinds = [] 
+  activeKinds = [],
+  user = null,
+  licenseeName = ""
 }: { 
   initialNodes?: Node[];
   activeKinds?: Kind[];
+  user?: any;
+  licenseeName?: string;
 }) {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -32,7 +37,7 @@ export default function Sidebar({
   const [searchedNodes, setSearchedNodes] = useState<Node[] | null>(null);
   const [isSearching, startTransitionSearch] = useTransition();
 
-  // --- 4-Gateway Creation State (Replacing Legacy 2-Track) ---
+  // --- 4-Gateway Creation State ---
   const [isMinting, setIsMinting] = useState(false);
   const [step, setStep] = useState<'GATEWAY' | 'FORM'>('GATEWAY');
   const [activeGateway, setActiveGateway] = useState<'IDENTITY' | 'PHYSICAL' | 'FILE' | 'URL' | null>(null);
@@ -410,13 +415,46 @@ export default function Sidebar({
           ))}
           {Object.keys(mediaByFormat).length === 0 && <p className="text-xs text-gray-400 italic px-2">No media found.</p>}
         </div>
-        
       </div>
 
-      <div className="p-4 border-t border-gray-200 bg-gray-50/50 mt-auto flex-shrink-0">
+      {/* FOOTER (Settings, User Profile, License) */}
+      <div className="p-4 border-t border-gray-200 bg-gray-50/80 mt-auto flex-shrink-0 flex flex-col gap-3">
         <a href="/dictionary" className="flex items-center gap-2 text-xs font-bold text-gray-500 hover:text-gray-900 uppercase tracking-widest transition-colors cursor-pointer">
           <span className="text-sm">⚙️</span> Manage Taxonomy
         </a>
+
+        {user && (
+          <div className="pt-3 border-t border-gray-200 flex items-center justify-between">
+            <div className="flex items-center gap-2 overflow-hidden">
+               {user.image || user.avatar ? (
+                 /* eslint-disable-next-line @next/next/no-img-element */
+                 <img src={user.image || user.avatar} alt={user.name || "User"} className="w-7 h-7 rounded-full shadow-sm object-cover" />
+               ) : (
+                 <div className="w-7 h-7 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold shadow-sm shrink-0">
+                   {user.name?.[0] || user.email?.[0]?.toUpperCase() || 'U'}
+                 </div>
+               )}
+               <div className="flex flex-col min-w-0">
+                 <span className="text-[10px] font-bold text-gray-900 truncate leading-tight">{user.name || user.email}</span>
+                 <span className="text-[9px] text-gray-500 uppercase tracking-wider truncate leading-tight">{user.role || 'System User'}</span>
+               </div>
+            </div>
+            <button 
+              onClick={() => signOut()} 
+              className="text-[10px] font-bold text-gray-400 hover:text-red-500 transition-colors uppercase tracking-widest cursor-pointer px-2"
+              title="Sign Out"
+            >
+              Exit
+            </button>
+          </div>
+        )}
+
+        {licenseeName && (
+          <div className="mt-1 pt-3 border-t border-gray-200 text-[9px] text-gray-400 font-mono uppercase tracking-widest text-center leading-relaxed">
+            Licensed Archive:<br/>
+            <span className="font-bold text-gray-500">{licenseeName}</span>
+          </div>
+        )}
       </div>
 
     </div>

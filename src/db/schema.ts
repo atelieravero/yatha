@@ -7,8 +7,20 @@ import { sql } from 'drizzle-orm';
 export const SYSTEM_PREDICATES = {
   CARRIES: '00000000-0000-4000-8000-000000000001',
   CONTAINS: '00000000-0000-4000-8000-000000000003',
-  // LINEAGE and REFERENCES have been successfully purged!
 };
+
+// ============================================================================
+// 0. USERS & AUTHENTICATION
+// ============================================================================
+export const users = pgTable('users', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  email: text('email').notNull().unique(),
+  name: text('name'),
+  avatar: text('avatar'),
+  role: text('role').notNull().default('VIEWER'), // 'SUPERUSER', 'ARCHIVIST', 'VIEWER'
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
 
 // ============================================================================
 // 1. KINDS (The Strict Flat Ontology for Identities)
@@ -31,12 +43,9 @@ export const predicates = pgTable('predicates', {
   isSystem: boolean('is_system').default(false).notNull(),
   isActive: boolean('is_active').default(true).notNull(),
   
-  // --- NEW: STRICT GRAPH PHYSICS CONFIGURATION ---
-  // Arrays of allowed layers ('IDENTITY', 'PHYSICAL', 'MEDIA'). If null/empty, all are allowed.
+  // Strict Graph Physics Configuration
   sourceLayers: text('source_layers').array(), 
   targetLayers: text('target_layers').array(),
-  
-  // Stores the kinds.id to pre-select when minting a new node via this predicate
   sourceDefaultKind: text('source_default_kind'), 
   targetDefaultKind: text('target_default_kind'),
 });
@@ -47,10 +56,7 @@ export const predicates = pgTable('predicates', {
 export const nodes = pgTable('nodes', {
   id: uuid('id').defaultRandom().primaryKey(),
   
-  // THE NEW 3-LAYER PHYSICS
   layer: text('layer').notNull(), // 'IDENTITY' | 'PHYSICAL' | 'MEDIA'
-  
-  // KIND IS NOW NULLABLE! Only Identity nodes require a strict taxonomy Kind.
   kind: text('kind'), 
   
   label: text('label').notNull(),
@@ -63,6 +69,9 @@ export const nodes = pgTable('nodes', {
   properties: jsonb('properties').notNull().default({}),
   
   isActive: boolean('is_active').default(true).notNull(),
+  
+  // NOTE: We keep this as text rather than a strict UUID Foreign Key constraint
+  // so that existing mock data ("system_user") doesn't crash the database during migration.
   updatedBy: text('updated_by').notNull().default('system'), 
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -78,7 +87,6 @@ export const edges = pgTable('edges', {
   predicateId: uuid('predicate_id').notNull(), 
   category: text('category').notNull(), // 'SEMANTIC' | 'STRUCTURAL' | 'CONTAINMENT'
   
-  // Spatial/Contextual property replacing 'role' and 'REFERENCES'
   properties: jsonb('properties').notNull().default({}),
   
   sourceSortOrder: integer('source_sort_order').default(999).notNull(),
@@ -89,6 +97,7 @@ export const edges = pgTable('edges', {
   notLaterThan: timestamp('not_later_than'),
   
   isActive: boolean('is_active').default(true).notNull(),
+  
   assertedBy: text('asserted_by').notNull(),
   assertedAt: timestamp('asserted_at').defaultNow().notNull(),
   retractedAt: timestamp('retracted_at'), 
@@ -105,7 +114,7 @@ export const nodeHistory = pgTable('node_history', {
   snapshotId: uuid('snapshot_id').defaultRandom().primaryKey(),
   nodeId: uuid('node_id').notNull(),
   
-  previousKind: text('previous_kind'), // Nullable
+  previousKind: text('previous_kind'),
   previousLabel: text('previous_label').notNull(),
   previousAliases: text('previous_aliases').array().notNull().default([]),
   previousTemporalInput: text('previous_temporal_input'),

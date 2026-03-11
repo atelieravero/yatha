@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Sidebar from "@/components/Sidebar";
 import "./globals.css";
 import { getRecentNodes, getAllKinds } from "@/app/actions";
+import { auth } from "@/auth";
 
 export const metadata: Metadata = {
   title: "yathā",
@@ -13,7 +14,10 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Fetch the nodes from the database directly in the server layout!
+  // 1. Fetch the active user session!
+  const session = await auth();
+
+  // 2. Fetch the nodes from the database directly in the server layout
   const rawNodes = await getRecentNodes();
 
   // Safely cast the raw nodes into the strict type expected by the Sidebar
@@ -33,8 +37,13 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased bg-gray-50 text-gray-900 font-sans flex h-screen overflow-hidden">
-        {/* Pass the fetched nodes AND kinds down to the client-side Sidebar */}
-        <Sidebar initialNodes={nodes} activeKinds={activeKinds} />
+        {/* Pass the fetched nodes, kinds, and user context down to the client-side Sidebar */}
+        <Sidebar 
+          initialNodes={nodes} 
+          activeKinds={activeKinds} 
+          user={session?.user} 
+          licenseeName={process.env.LICENSEE_NAME}
+        />
         
         {/* The Main Panel (page.tsx) fills the remaining space */}
         <main className="flex-1 overflow-y-auto relative">
