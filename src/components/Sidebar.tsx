@@ -33,6 +33,9 @@ export default function Sidebar({
   const searchParams = useSearchParams();
   const router = useRouter();
   const activeNodeId = searchParams.get("node");
+  
+  // Is the user allowed to edit?
+  const canWrite = user?.role === 'SUPERUSER' || user?.role === 'ARCHIVIST';
 
   // --- Search State ---
   const [searchTerm, setSearchTerm] = useState("");
@@ -130,10 +133,9 @@ export default function Sidebar({
   };
 
   const processFormSubmit = async () => {
-    if (!activeGateway) return;
+    if (!activeGateway || !canWrite) return;
 
     if (activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') {
-      // Use the new helper to check the entire DB (including trash) and check aliases!
       const exactMatch = await getExactMatchNode(mintLabel, activeGateway);
       if (exactMatch) {
         setDuplicateFound(exactMatch);
@@ -189,7 +191,7 @@ export default function Sidebar({
   };
 
   const handleRestoreFromTrash = () => {
-    if (!duplicateFound) return;
+    if (!duplicateFound || !canWrite) return;
     startTransitionSubmit(async () => {
       await restoreNode(duplicateFound.id);
       router.push(`/?node=${duplicateFound.id}`);
@@ -222,18 +224,20 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* GLOBAL MINTING BUTTON */}
-      <div className="px-4 pb-4 border-b border-gray-100 flex">
-        <button 
-          onClick={() => { setIsMinting(true); setStep('GATEWAY'); }}
-          className="flex-1 flex flex-col items-center justify-center py-2 bg-gray-900 text-white rounded shadow-sm hover:bg-gray-800 transition-colors cursor-pointer"
-        >
-          <span className="text-[10px] font-bold uppercase tracking-widest leading-none mb-0.5 flex items-center gap-1"><span className="text-sm leading-none">+</span> Add to Archive</span>
-        </button>
-      </div>
+      {/* GLOBAL MINTING BUTTON (Hidden for Viewers) */}
+      {canWrite && (
+        <div className="px-4 pb-4 border-b border-gray-100 flex">
+          <button 
+            onClick={() => { setIsMinting(true); setStep('GATEWAY'); }}
+            className="flex-1 flex flex-col items-center justify-center py-2 bg-gray-900 text-white rounded shadow-sm hover:bg-gray-800 transition-colors cursor-pointer"
+          >
+            <span className="text-[10px] font-bold uppercase tracking-widest leading-none mb-0.5 flex items-center gap-1"><span className="text-sm leading-none">+</span> Add to Archive</span>
+          </button>
+        </div>
+      )}
 
       {/* 4-GATEWAY GLOBAL MINTING PANEL */}
-      {isMinting && (
+      {isMinting && canWrite && (
         <div className="p-4 border-b border-gray-200 bg-gray-50/80 animate-in fade-in slide-in-from-top-2 relative shadow-inner">
           <div className="flex justify-between items-center mb-3">
             <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest">
@@ -433,9 +437,18 @@ export default function Sidebar({
 
       {/* FOOTER (Settings, User Profile, License) */}
       <div className="p-4 border-t border-gray-200 bg-gray-50/80 mt-auto flex-shrink-0 flex flex-col gap-3">
-        <Link scroll={false} href="/dictionary" className="flex items-center gap-2 text-xs font-bold text-gray-500 hover:text-gray-900 uppercase tracking-widest transition-colors cursor-pointer">
-          <span className="text-sm">⚙️</span> Manage Taxonomy
-        </Link>
+        
+        {canWrite && (
+           <Link scroll={false} href="/dictionary" className="flex items-center gap-2 text-xs font-bold text-gray-500 hover:text-gray-900 uppercase tracking-widest transition-colors cursor-pointer">
+             <span className="text-sm">⚙️</span> Manage Taxonomy
+           </Link>
+        )}
+        
+        {user?.role === 'SUPERUSER' && (
+          <Link scroll={false} href="/admin" className="flex items-center gap-2 text-xs font-bold text-blue-600 hover:text-blue-800 uppercase tracking-widest transition-colors cursor-pointer">
+            <span className="text-sm">👥</span> Manage Users
+          </Link>
+        )}
 
         {user && (
           <div className="pt-3 border-t border-gray-200 flex items-center justify-between">

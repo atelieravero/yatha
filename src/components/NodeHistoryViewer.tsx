@@ -26,8 +26,12 @@ export default function NodeHistoryViewer({ nodeId }: { nodeId: string }) {
     if (!window.confirm("Are you sure you want to restore this version? The current state will be safely saved to history before rewinding.")) return;
     
     startTransition(async () => {
-      await restoreNodeSnapshot(nodeId, snapshotId);
-      setIsOpen(false);
+      try {
+        await restoreNodeSnapshot(nodeId, snapshotId);
+        setIsOpen(false);
+      } catch (e: any) {
+        alert(e.message || "Failed to restore. You may not have permission.");
+      }
     });
   };
 
@@ -74,17 +78,33 @@ export default function NodeHistoryViewer({ nodeId }: { nodeId: string }) {
               ) : (
                 history.map((snapshot) => (
                   <div key={snapshot.snapshotId} className="border border-gray-200 rounded-lg bg-white overflow-hidden shadow-sm">
-                    {/* Header */}
+                    {/* Header: User & Timestamp */}
                     <div className="bg-gray-50 px-3 py-2 border-b border-gray-200 flex justify-between items-center">
-                      <span className="text-xs font-mono text-gray-500">
-                        {new Date(snapshot.replacedAt).toLocaleString()}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {snapshot.userAvatar ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img src={snapshot.userAvatar} alt="User" className="w-5 h-5 rounded-full shadow-sm" />
+                        ) : (
+                          <div className="w-5 h-5 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-[9px] font-bold shadow-sm">
+                            {(snapshot.userName || snapshot.userEmail || "S")[0].toUpperCase()}
+                          </div>
+                        )}
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-bold text-gray-800 leading-none">
+                            {snapshot.userName || snapshot.userEmail || "System Migration"}
+                          </span>
+                          <span className="text-[9px] text-gray-500 font-mono">
+                            {new Date(snapshot.replacedAt).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+
                       <button
                         onClick={() => handleRestore(snapshot.snapshotId)}
                         disabled={isPending}
-                        className="text-[10px] uppercase tracking-wider font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded hover:bg-blue-100 transition-colors disabled:opacity-50 cursor-pointer"
+                        className="text-[10px] uppercase tracking-wider font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded hover:bg-blue-100 transition-colors disabled:opacity-50 cursor-pointer border border-blue-100"
                       >
-                        {isPending ? "Restoring..." : "Restore This"}
+                        {isPending ? "Restoring..." : "Restore"}
                       </button>
                     </div>
                     
@@ -118,7 +138,7 @@ export default function NodeHistoryViewer({ nodeId }: { nodeId: string }) {
                       {Object.keys(snapshot.previousProperties || {}).length > 0 && (
                         <div>
                           <span className="text-xs font-bold text-gray-400 uppercase block mb-1">Properties</span>
-                          <div className="bg-gray-50 p-2 rounded text-xs font-mono text-gray-600 overflow-x-auto whitespace-pre-wrap">
+                          <div className="bg-gray-50 p-2 rounded text-xs font-mono text-gray-600 overflow-x-auto whitespace-pre-wrap border border-gray-100">
                             {JSON.stringify(snapshot.previousProperties, null, 2)}
                           </div>
                         </div>

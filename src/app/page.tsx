@@ -3,7 +3,6 @@ import { db } from "@/db";
 import { nodes, edges, SYSTEM_PREDICATES } from "@/db/schema";
 import { getSecureMediaUrl, getRecentNodes, getAllKinds, seedSystemPredicates, getAllPredicates } from "@/app/actions";
 import { getMediaDetails } from "@/lib/mediaUtils";
-import MediaUploader from "@/components/MediaUploader";
 import UniversalBuilder from "@/components/UniversalBuilder";
 import PropertiesEditor from "@/components/PropertiesEditor";
 import NodeClassification from "@/components/NodeClassification";
@@ -42,7 +41,6 @@ export default async function Home({
   const [rawActiveNode] = await db.select().from(nodes).where(eq(nodes.id, nodeId));
   if (!rawActiveNode) return <div className="p-8 text-red-500">Node not found.</div>;
 
-  // Safely cast the database node to match the strict MinimalNode interface
   const activeNode = {
     ...rawActiveNode,
     layer: rawActiveNode.layer as "IDENTITY" | "PHYSICAL" | "MEDIA",
@@ -51,7 +49,6 @@ export default async function Home({
 
   // ============================================================================
   // TOMBSTONE INTERCEPTOR
-  // If the node is in the trash, short-circuit the heavy graph queries!
   // ============================================================================
   if (!activeNode.isActive) {
     return (
@@ -95,11 +92,6 @@ export default async function Home({
     return (weightA ?? 999) - (weightB ?? 999);
   });
 
-  // ============================================================================
-  // PAGINATION BLINDSPOT FIX
-  // Ensure we explicitly fetch the exact nodes connected via edges, 
-  // bypassing the getRecentNodes 50-item limit.
-  // ============================================================================
   const connectedNodeIds = new Set<string>();
   connectedEdges.forEach(e => {
     connectedNodeIds.add(e.sourceId);
@@ -114,23 +106,17 @@ export default async function Home({
 
   const recentNodes = await getRecentNodes();
   
-  // Merge recent nodes with explicitly required edge nodes to form the complete dictionary
   const allNodesMap = new Map();
   recentNodes.forEach(n => allNodesMap.set(n.id, n));
   edgeNodes.forEach(n => allNodesMap.set(n.id, n));
   const allNodes = Array.from(allNodesMap.values());
-  // ============================================================================
 
   const allPredicates = await getAllPredicates();
   const allKinds = await getAllKinds();
   const activeKinds = allKinds.filter(k => k.isActive);
 
   const nodeProps = (activeNode.properties as Record<string, any>) || {};
-  
-  // Centralized media parsing logic
   const { isImage, isVideo, isAudio, isYouTube, isWebLink, ytId, webUrl } = getMediaDetails(nodeProps);
-
-  // Prevent rendering the Upload box if we have a valid fileUrl OR an external link
   const hasFile = !!nodeProps.fileUrl || isYouTube || isWebLink;
 
   let secureViewUrl = "";
@@ -143,9 +129,6 @@ export default async function Home({
     }
   }
 
-  // ============================================================================
-  // PEEK DRAWER STATE
-  // ============================================================================
   const rawPeekId = params?.peek;
   const peekId = Array.isArray(rawPeekId) ? rawPeekId[0] : rawPeekId;
   let peekNode = null;
@@ -154,8 +137,6 @@ export default async function Home({
   if (peekId) {
     peekNode = allNodes.find(n => n.id === peekId);
     const peekProps = (peekNode?.properties as Record<string, any>) || {};
-    
-    // Centralized media parsing logic for the peeked node
     const peekMedia = getMediaDetails(peekProps);
     const peekIsWeb = peekMedia.isWebLink || peekMedia.isYouTube;
     
@@ -167,9 +148,6 @@ export default async function Home({
     }
   }
 
-  // ============================================================================
-  // PURE 3-LAYER UI MANIFEST ROUTING
-  // ============================================================================
   const isIdentity = activeNode.layer === 'IDENTITY';
   const isPhysical = activeNode.layer === 'PHYSICAL';
   const isMedia = activeNode.layer === 'MEDIA';
@@ -181,10 +159,8 @@ export default async function Home({
   const digitalArtifacts: { edge: any, node: any, isSource: boolean }[] = [];
   const mediaAppearances: { edge: any, node: any, isSource: boolean }[] = []; 
   const conceptualSemantics: { edge: any, node: any, isSource: boolean }[] = []; 
-  
   const bridgedConcepts: { edge: any, node: any, isSource: boolean }[] = []; 
   const physicalSources: { edge: any, node: any, isSource: boolean }[] = []; 
-  
   const containedIn: { edge: any, node: any, isSource: boolean }[] = [];
   const containsItems: { edge: any, node: any, isSource: boolean }[] = [];
 
@@ -273,7 +249,7 @@ export default async function Home({
                 <EdgeRow 
                   key={item.edge.id} edge={item.edge} node={item.node} isSource={item.isSource} 
                   predDef={allPredicates.find(p => p.id === item.edge.predicateId) || { forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} 
-                  currentTab={currentTab} activeNodeId={activeNode.id} activeKinds={activeKinds} hideEdit={true} hideBadge={true}
+                  currentTab={currentTab} activeNodeId={activeNode.id} activeKinds={activeKinds} hideEdit={true} hideBadge={true} 
                 />
               ))}
             </div>
@@ -306,7 +282,7 @@ export default async function Home({
                 <EdgeRow 
                   key={item.edge.id} edge={item.edge} node={item.node} isSource={item.isSource} 
                   predDef={allPredicates.find(p => p.id === item.edge.predicateId) || { forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} 
-                  currentTab={currentTab} activeNodeId={activeNode.id} activeKinds={activeKinds} hideEdit={true} hideBadge={true}
+                  currentTab={currentTab} activeNodeId={activeNode.id} activeKinds={activeKinds} hideEdit={true} hideBadge={true} 
                 />
               ))}
             </div>
@@ -333,7 +309,9 @@ export default async function Home({
                 ) : <div className="p-8 text-gray-400 animate-pulse text-sm font-bold">Loading secure viewer...</div>}
               </div>
             ) : (
-              <MediaUploader nodeId={activeNode.id} />
+              <div className="p-8 text-gray-400 italic text-center text-sm border-2 border-dashed border-gray-200 rounded-xl bg-gray-50">
+                No media payload attached to this record.
+              </div>
             )}
           </div>
         )}
@@ -373,8 +351,7 @@ export default async function Home({
              <UniversalBuilder 
                sourceNode={activeNode} allNodes={allNodes as any} activeKinds={activeKinds} allPredicates={allPredicates}
                config={{
-                 mode: 'SEMANTIC', // REMOVED: direction
-                 // Rule: Identity can't use Media in this block (uses Appearances tab instead). Physical can't use Physical. Media can't use Media.
+                 mode: 'SEMANTIC', 
                  allowedGateways: isIdentity ? ['IDENTITY', 'PHYSICAL'] : (isPhysical ? ['IDENTITY', 'FILE', 'URL'] : ['IDENTITY', 'PHYSICAL']),
                  buttonLabel: 'Assert Link', modalTitle: 'Semantic Connection', icon: '🔗', theme: 'emerald', hideEdgeProperties: false
                }}
@@ -425,7 +402,7 @@ export default async function Home({
                 <UniversalBuilder 
                    sourceNode={activeNode} allNodes={allNodes as any} activeKinds={activeKinds} allPredicates={allPredicates}
                    config={{
-                     mode: 'SEMANTIC', // REMOVED: direction
+                     mode: 'SEMANTIC',
                      allowedGateways: ['FILE', 'URL'],
                      buttonLabel: 'Tag in Media', modalTitle: 'Media Appearance', icon: '📸', theme: 'emerald', hideEdgeProperties: false
                    }}

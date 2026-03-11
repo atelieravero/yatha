@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { nodes, edges, nodeHistory, kinds, predicates, SYSTEM_PREDICATES } from "@/db/schema";
+import { users, nodes, edges, nodeHistory, kinds, predicates, SYSTEM_PREDICATES } from "@/db/schema";
 import { eq, desc, ilike, or, sql, and, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { generateUploadUrl, generateReadUrl } from "@/lib/s3";
@@ -19,6 +19,69 @@ async function requireUserId() {
     throw new Error("Unauthorized: No active session. Please log in.");
   }
   return userId as string;
+}
+
+// Strict helper for Admin Panel actions
+async function requireSuperuser() {
+  const session = await auth();
+  const user = session?.user as any;
+  if (!user?.id || user?.role !== 'SUPERUSER') {
+    throw new Error("Unauthorized: Superuser access required.");
+  }
+  return user.id as string;
+}
+
+// ============================================================================
+// USER MANAGEMENT (Admin Panel)
+// ============================================================================
+
+export async function getAllUsers() {
+  await requireSuperuser();
+  return await db.select().from(users).orderBy(desc(users.createdAt));
+}
+
+export async function inviteUser(email: string, role: string) {
+  await requireSuperuser();
+  
+  // Basic validation
+  const normalizedEmail = email.toLowerCase().trim();
+  if (!normalizedEmail || !normalizedEmail.includes('@')) {
+    throw new Error("Invalid email address.");
+  }
+
+  // Ensure they don't already exist
+  const existing = await db.select().from(users).where(eq(users.email, normalizedEmail));
+  if (existing.length > 0) {
+    throw new Error("User already exists.");
+  }
+
+  await db.insert(users).values({
+    email: normalizedEmail,
+    role: role,
+    isActive: true,
+  });
+
+  revalidatePath('/admin');
+}
+
+export async function updateUserRole(userId: string, newRole: string) {
+  await requireSuperuser();
+  
+  await db.update(users)
+    .set({ role: newRole })
+    .where(eq(users.id, userId));
+    
+  revalidatePath('/admin');
+}
+
+export async function toggleUserAccess(userId: string, isActive: boolean) {
+  await requireSuperuser();
+  
+  await db.update(users)
+    .set({ isActive })
+    .where(eq(users.id, userId));
+    
+  revalidatePath('/admin');
 }
 
 // ============================================================================
