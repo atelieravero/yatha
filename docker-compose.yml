@@ -1,42 +1,47 @@
-
+version: '3.8'
 
 services:
-  # 1. The PostgreSQL Database
-  db:
-    image: postgres:16-alpine
-    restart: always
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-yatha_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-yatha_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-yatha_db}
-    ports:
-      - "5432:5432"
-    volumes:
-      - yatha_db_data:/var/lib/postgresql/data # Persists your graph data!
-
-  # 2. The Next.js Web Application
   web:
     build:
       context: .
       dockerfile: Dockerfile
-    restart: always
     ports:
       - "3000:3000"
     environment:
-      # Automatically construct the DB URL from the variables above
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-yatha_user}:${POSTGRES_PASSWORD:-yatha_secret}@db:5432/${POSTGRES_DB:-yatha_db}
-      
-      # Cloudflare R2 / S3 Configuration for Media
-      - S3_ENDPOINT=${S3_ENDPOINT}
-      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}
-      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}
-      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
-      
-      # App Settings
+      # These will be pulled from your local .env file when testing locally
       - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+      - AUTH_SECRET=${AUTH_SECRET}
+      - AUTH_GOOGLE_ID=${AUTH_GOOGLE_ID}
+      - AUTH_GOOGLE_SECRET=${AUTH_GOOGLE_SECRET}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
+      - NEXT_PUBLIC_R2_PUBLIC_URL=${NEXT_PUBLIC_R2_PUBLIC_URL}
     depends_on:
       - db
+    networks:
+      - yatha_network
+
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: yatha
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - yatha_network
 
 volumes:
-  # This ensures your Postgres data isn't wiped when the container stops
-  yatha_db_data:
+  pgdata:
+
+networks:
+  yatha_network:
+    driver: bridge
