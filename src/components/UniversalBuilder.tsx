@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
-import { assertEdge, createNode, getUploadTicket, attachFileToNode, checkDuplicateArtifact, createPredicate } from "@/app/actions";
+import { assertEdge, createNode, getUploadTicket, attachFileToNode, checkDuplicateArtifact, createPredicate, getExactMatchNode, restoreNode } from "@/app/actions";
 import { SYSTEM_PREDICATES } from "@/db/schema";
 
-type MinimalNode = { id: string; label: string; layer: "IDENTITY" | "PHYSICAL" | "MEDIA"; kind?: string | null; aliases?: string[] };
+type MinimalNode = { id: string; label: string; layer: "IDENTITY" | "PHYSICAL" | "MEDIA"; kind?: string | null; aliases?: string[]; isActive?: boolean };
 type Kind = { id: string; label: string; icon: string; isActive: boolean };
 
 type Predicate = { 
@@ -291,18 +291,11 @@ export default function UniversalBuilder({
     if (!activeGateway) return;
 
     if (activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') {
-      // Soft Dedupe Check (Now Alias-Aware!)
-      const normalizedMintLabel = mintLabel.toLowerCase().trim();
-      const exactMatch = allNodes.find(n => 
-        n.layer === activeGateway && 
-        (
-          n.label.toLowerCase() === normalizedMintLabel || 
-          (n.aliases && n.aliases.some(alias => alias.toLowerCase() === normalizedMintLabel))
-        )
-      );
+      // Soft Dedupe Check (Now Alias-Aware AND Trash-Aware!)
+      const exactMatch = await getExactMatchNode(mintLabel, activeGateway);
 
       if (exactMatch) {
-        setDuplicateFound(exactMatch);
+        setDuplicateFound(exactMatch as MinimalNode);
         return; 
       }
       proceedToPropertiesOrExecute();
@@ -334,6 +327,14 @@ export default function UniversalBuilder({
       }
       proceedToPropertiesOrExecute();
     }
+  };
+
+  const handleRestoreFromTrash = () => {
+    if (!duplicateFound) return;
+    startTransition(async () => {
+      await restoreNode(duplicateFound.id);
+      handleSelectExisting(duplicateFound.id);
+    });
   };
 
   const handleCreatePredicate = () => {
@@ -692,20 +693,34 @@ export default function UniversalBuilder({
               </div>
             )}
 
-            {/* Dedupe Warning Interceptor */}
+            {/* TRASH-AWARE DEDUPLICATION WARNING */}
             {duplicateFound && (
-              <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-md">
-                <p className="text-xs font-bold text-amber-800 mb-1 flex items-center gap-1"><span>⚠️</span> Exact Match Found</p>
-                <p className="text-[10px] text-amber-700 mb-3">"{duplicateFound.label}"
-                    {duplicateFound.aliases && duplicateFound.aliases.length > 0 && (
-                      <span className="opacity-80"> ({duplicateFound.aliases.join(', ')})</span>
-                    )} already exists.</p>
-                <div className="flex gap-2">
-                  <button onClick={() => handleSelectExisting(duplicateFound.id)} className="flex-1 py-1.5 bg-amber-600 text-white text-xs font-bold rounded shadow-sm hover:bg-amber-700 cursor-pointer">Use Existing</button>
-                  {(activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
-                    <button onClick={() => proceedToPropertiesOrExecute()} className="flex-1 py-1.5 bg-white text-amber-700 border border-amber-200 text-xs font-bold rounded shadow-sm hover:bg-amber-100 cursor-pointer">Mint Duplicate</button>
-                  )}
-                </div>
+              <div className={`mt-4 p-3 border rounded-md ${duplicateFound.isActive === false ? 'bg-gray-100 border-gray-300' : 'bg-amber-50 border-amber-200'}`}>
+                {duplicateFound.isActive === false ? (
+                  <>
+                    <p className="text-xs font-bold text-gray-800 mb-1 flex items-center gap-1"><span>🗑️</span> Found in Trash</p>
+                    <p className="text-[10px] text-gray-600 mb-3">"{duplicateFound.label}" exists, but it was moved to the trash.</p>
+                    <button onClick={handleRestoreFromTrash} disabled={isPending} className="w-full py-1.5 bg-gray-800 text-white text-xs font-bold rounded hover:bg-gray-900 cursor-pointer shadow-sm">
+                      {isPending ? "..." : "Restore & Use Record"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs font-bold text-amber-800 mb-1 flex items-center gap-1"><span>⚠️</span> Exact Match Found</p>
+                    <p className="text-[10px] text-amber-700 mb-3">
+                      "{duplicateFound.label}"
+                      {duplicateFound.aliases && duplicateFound.aliases.length > 0 && (
+                        <span className="opacity-80"> ({duplicateFound.aliases.join(', ')})</span>
+                      )} already exists.
+                    </p>
+                    <div className="flex gap-2">
+                      <button onClick={() => handleSelectExisting(duplicateFound.id)} className="flex-1 py-1.5 bg-amber-600 text-white text-xs font-bold rounded shadow-sm hover:bg-amber-700 cursor-pointer">Use Existing</button>
+                      {(activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
+                        <button onClick={() => proceedToPropertiesOrExecute()} className="flex-1 py-1.5 bg-white text-amber-700 border border-amber-200 text-xs font-bold rounded shadow-sm hover:bg-amber-100 cursor-pointer">Mint Duplicate</button>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             )}
 

@@ -3,7 +3,8 @@
 import { useState, useEffect, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { createNode, searchGraphNodes, checkDuplicateArtifact, getUploadTicket, attachFileToNode } from "@/app/actions";
+import Link from "next/link";
+import { createNode, searchGraphNodes, checkDuplicateArtifact, getUploadTicket, attachFileToNode, getExactMatchNode, restoreNode } from "@/app/actions";
 import { getMediaDetails } from "@/lib/mediaUtils";
 
 type Node = {
@@ -13,6 +14,7 @@ type Node = {
   kind?: string | null; 
   aliases?: string[];
   properties?: Record<string, any>;
+  isActive?: boolean;
 };
 
 type Kind = { id: string; label: string; icon: string; };
@@ -131,16 +133,8 @@ export default function Sidebar({
     if (!activeGateway) return;
 
     if (activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') {
-      // Soft Dedupe (Now Alias-Aware!)
-      const normalizedMintLabel = mintLabel.toLowerCase().trim();
-      const exactMatch = initialNodes.find(n => 
-        n.layer === activeGateway && 
-        (
-          n.label.toLowerCase() === normalizedMintLabel || 
-          (n.aliases && n.aliases.some(alias => alias.toLowerCase() === normalizedMintLabel))
-        )
-      );
-
+      // Use the new helper to check the entire DB (including trash) and check aliases!
+      const exactMatch = await getExactMatchNode(mintLabel, activeGateway);
       if (exactMatch) {
         setDuplicateFound(exactMatch);
         return; 
@@ -148,7 +142,6 @@ export default function Sidebar({
       executeGlobalMint();
     } 
     else if (activeGateway === 'FILE' || activeGateway === 'URL') {
-      // Hard Dedupe
       if (activeGateway === 'FILE' && file) {
         const buffer = await file.arrayBuffer();
         const hashBuf = await crypto.subtle.digest('SHA-256', buffer);
@@ -192,6 +185,15 @@ export default function Sidebar({
 
       resetMinting();
       if (finalTargetId) router.push(`/?node=${finalTargetId}`);
+    });
+  };
+
+  const handleRestoreFromTrash = () => {
+    if (!duplicateFound) return;
+    startTransitionSubmit(async () => {
+      await restoreNode(duplicateFound.id);
+      router.push(`/?node=${duplicateFound.id}`);
+      resetMinting();
     });
   };
 
@@ -302,22 +304,34 @@ export default function Sidebar({
                 </div>
               )}
 
-              {/* Dedupe Warning */}
+              {/* TRASH-AWARE DEDUPLICATION WARNING */}
               {duplicateFound && (
-                <div className="p-2 mb-3 bg-amber-50 border border-amber-200 rounded-md">
-                  <p className="text-[10px] font-bold text-amber-800 mb-0.5 flex items-center gap-1"><span>⚠️</span> Exact Match Found</p>
-                  <p className="text-[9px] text-amber-700 mb-2">
-                    "{duplicateFound.label}"
-                    {duplicateFound.aliases && duplicateFound.aliases.length > 0 && (
-                      <span className="opacity-80"> ({duplicateFound.aliases.join(', ')})</span>
-                    )} exists.
-                  </p>
-                  <div className="flex gap-1">
-                    <button onClick={() => { router.push(`/?node=${duplicateFound.id}`); resetMinting(); }} className="flex-1 py-1 bg-amber-600 text-white text-[10px] font-bold rounded hover:bg-amber-700 cursor-pointer">Go to Record</button>
-                    {(activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
-                      <button onClick={executeGlobalMint} className="flex-1 py-1 bg-white text-amber-700 border border-amber-200 text-[10px] font-bold rounded hover:bg-amber-100 cursor-pointer">Mint Duplicate</button>
-                    )}
-                  </div>
+                <div className={`p-2 mb-3 border rounded-md ${duplicateFound.isActive === false ? 'bg-gray-100 border-gray-300' : 'bg-amber-50 border-amber-200'}`}>
+                  {duplicateFound.isActive === false ? (
+                    <>
+                      <p className="text-[10px] font-bold text-gray-800 mb-0.5 flex items-center gap-1"><span>🗑️</span> Found in Trash</p>
+                      <p className="text-[9px] text-gray-600 mb-2">"{duplicateFound.label}" exists, but it was moved to the trash.</p>
+                      <button onClick={handleRestoreFromTrash} disabled={isSubmitting} className="w-full py-1 bg-gray-800 text-white text-[10px] font-bold rounded hover:bg-gray-900 cursor-pointer shadow-sm">
+                        {isSubmitting ? "..." : "Restore Record"}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-[10px] font-bold text-amber-800 mb-0.5 flex items-center gap-1"><span>⚠️</span> Exact Match Found</p>
+                      <p className="text-[9px] text-amber-700 mb-2">
+                        "{duplicateFound.label}"
+                        {duplicateFound.aliases && duplicateFound.aliases.length > 0 && (
+                          <span className="opacity-80"> ({duplicateFound.aliases.join(', ')})</span>
+                        )} exists.
+                      </p>
+                      <div className="flex gap-1">
+                        <button onClick={() => { router.push(`/?node=${duplicateFound.id}`); resetMinting(); }} className="flex-1 py-1 bg-amber-600 text-white text-[10px] font-bold rounded hover:bg-amber-700 cursor-pointer">Go to Record</button>
+                        {(activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
+                          <button onClick={executeGlobalMint} className="flex-1 py-1 bg-white text-amber-700 border border-amber-200 text-[10px] font-bold rounded hover:bg-amber-100 cursor-pointer">Mint Duplicate</button>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -356,12 +370,12 @@ export default function Sidebar({
                 <ul className="space-y-0.5">
                   {nodes.map((node) => (
                     <li key={node.id}>
-                      <a href={`/?node=${node.id}`} className={`block px-3 py-1.5 rounded-md text-sm transition-colors overflow-hidden ${activeNodeId === node.id ? "bg-blue-50 text-blue-800 font-medium" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"}`}>
+                      <Link scroll={false} href={`/?node=${node.id}`} className={`block px-3 py-1.5 rounded-md text-sm transition-colors overflow-hidden ${activeNodeId === node.id ? "bg-blue-50 text-blue-800 font-medium" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"}`}>
                         <span className="truncate block">
                           {node.label}
                           {node.aliases && node.aliases.length > 0 && <span className="text-gray-400 font-normal ml-1.5 text-[10px]">({node.aliases.join(', ')})</span>}
                         </span>
-                      </a>
+                      </Link>
                     </li>
                   ))}
                 </ul>
@@ -379,11 +393,11 @@ export default function Sidebar({
           <ul className="space-y-0.5">
             {physicalNodes.map((node) => (
               <li key={node.id}>
-                <a href={`/?node=${node.id}`} className={`block px-3 py-1.5 rounded-md text-sm transition-colors overflow-hidden ${activeNodeId === node.id ? "bg-emerald-50 text-emerald-800 font-medium" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"}`}>
+                <Link scroll={false} href={`/?node=${node.id}`} className={`block px-3 py-1.5 rounded-md text-sm transition-colors overflow-hidden ${activeNodeId === node.id ? "bg-emerald-50 text-emerald-800 font-medium" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"}`}>
                   <span className="truncate block">
                     <span className="opacity-80 mr-1">📦</span> {node.label}
                   </span>
-                </a>
+                </Link>
               </li>
             ))}
           </ul>
@@ -403,11 +417,11 @@ export default function Sidebar({
               <ul className="space-y-0.5">
                 {nodes.map((node) => (
                   <li key={node.id}>
-                    <a href={`/?node=${node.id}`} className={`block px-3 py-1.5 rounded-md text-sm transition-colors overflow-hidden ${activeNodeId === node.id ? "bg-amber-50 text-amber-800 font-medium" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"}`}>
+                    <Link scroll={false} href={`/?node=${node.id}`} className={`block px-3 py-1.5 rounded-md text-sm transition-colors overflow-hidden ${activeNodeId === node.id ? "bg-amber-50 text-amber-800 font-medium" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"}`}>
                       <span className="truncate block">
                         {node.label}
                       </span>
-                    </a>
+                    </Link>
                   </li>
                 ))}
               </ul>
@@ -419,9 +433,9 @@ export default function Sidebar({
 
       {/* FOOTER (Settings, User Profile, License) */}
       <div className="p-4 border-t border-gray-200 bg-gray-50/80 mt-auto flex-shrink-0 flex flex-col gap-3">
-        <a href="/dictionary" className="flex items-center gap-2 text-xs font-bold text-gray-500 hover:text-gray-900 uppercase tracking-widest transition-colors cursor-pointer">
+        <Link scroll={false} href="/dictionary" className="flex items-center gap-2 text-xs font-bold text-gray-500 hover:text-gray-900 uppercase tracking-widest transition-colors cursor-pointer">
           <span className="text-sm">⚙️</span> Manage Taxonomy
-        </a>
+        </Link>
 
         {user && (
           <div className="pt-3 border-t border-gray-200 flex items-center justify-between">

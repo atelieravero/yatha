@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
+import Link from "next/link";
 import EdgeRetractButton from "@/components/EdgeRetractButton";
 import { parseFuzzyTemporal } from "@/lib/dateParser";
 import { updateEdgeProperties } from "@/app/actions";
@@ -132,27 +133,36 @@ export default function EdgeRow({
     );
   }
 
+  // --- TOMBSTONE HANDLING (Zombie Links) ---
+  const isTargetDead = node.isActive === false;
+
   return (
-    <div className="group p-3 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow">
+    <div className={`group p-3 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-all ${isTargetDead ? 'opacity-60 bg-gray-50/50' : ''}`}>
       <div className="flex flex-wrap items-center gap-3">
         {!hideBadge && (
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${predDef.isSystem ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${isTargetDead ? 'bg-gray-100 text-gray-500 border-gray-200' : predDef.isSystem ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
             {displayPredicate}
           </span>
         )}
         
-        <a href={`/?node=${activeNodeId}&tab=${currentTab}&peek=${node.id}`} className="font-medium text-sm text-gray-900 hover:text-blue-600 hover:underline flex items-center gap-1.5 cursor-pointer max-w-full">
-          <span className="opacity-80 text-xs shrink-0" title={kindLabel}>{icon}</span>
+        {/* CHANGED: Now uses Next.js Link to soft-update the URL, and opens the target in the Peek Drawer instead of hard-navigating! */}
+        <Link 
+          scroll={false} 
+          href={`/?node=${activeNodeId}&tab=${currentTab}&peek=${node.id}`} 
+          className={`font-medium text-sm flex items-center gap-1.5 cursor-pointer max-w-full transition-colors ${isTargetDead ? 'text-gray-500 hover:text-gray-800' : 'text-gray-900 hover:text-blue-600 hover:underline'}`}
+        >
+          <span className={`text-xs shrink-0 ${isTargetDead ? 'grayscale opacity-50' : 'opacity-80'}`} title={kindLabel}>{icon}</span>
           <span className="truncate block">
-            {node.label}
-            {node.aliases && node.aliases.length > 0 && (
+            <span className={isTargetDead ? 'line-through decoration-gray-400' : ''}>{node.label}</span>
+            {isTargetDead && <span className="ml-2 text-[10px] font-bold text-red-500 uppercase tracking-widest no-underline">(Deleted)</span>}
+            {!isTargetDead && node.aliases && node.aliases.length > 0 && (
               <span className="text-gray-400 font-normal ml-1.5 text-xs">({node.aliases.join(', ')})</span>
             )}
           </span>
-        </a>
+        </Link>
 
         {locator && (
-          <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-200" title="Locator / Position">
+          <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${isTargetDead ? 'bg-gray-100 text-gray-500 border-gray-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`} title="Locator / Position">
             📍 {locator}
           </span>
         )}
@@ -164,7 +174,7 @@ export default function EdgeRow({
         )}
         
         <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pl-2">
-            {!hideEdit && (
+            {!hideEdit && !isTargetDead && (
               <button 
                 onClick={() => setIsEditing(true)}
                 className="text-xs font-medium text-blue-600 px-2 py-1.5 hover:bg-blue-50 rounded-md cursor-pointer transition-colors" 
@@ -173,6 +183,19 @@ export default function EdgeRow({
                 ✎ Edit
               </button>
             )}
+            
+            {/* Quick action to go to a dead node to restore it */}
+            {isTargetDead && (
+               <Link 
+                 scroll={false}
+                 href={`/?node=${node.id}`}
+                 className="text-xs font-bold text-blue-500 px-2 py-1.5 hover:bg-blue-50 rounded-md cursor-pointer transition-colors uppercase tracking-widest" 
+                 title="Go to Tombstone"
+               >
+                 Restore
+               </Link>
+            )}
+            
           <EdgeRetractButton edgeId={edge.id} />
         </div>
       </div>
