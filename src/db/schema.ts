@@ -30,6 +30,15 @@ export const predicates = pgTable('predicates', {
   isSymmetric: boolean('is_symmetric').default(false).notNull(),
   isSystem: boolean('is_system').default(false).notNull(),
   isActive: boolean('is_active').default(true).notNull(),
+  
+  // --- NEW: STRICT GRAPH PHYSICS CONFIGURATION ---
+  // Arrays of allowed layers ('IDENTITY', 'PHYSICAL', 'MEDIA'). If null/empty, all are allowed.
+  sourceLayers: text('source_layers').array(), 
+  targetLayers: text('target_layers').array(),
+  
+  // Stores the kinds.id to pre-select when minting a new node via this predicate
+  sourceDefaultKind: text('source_default_kind'), 
+  targetDefaultKind: text('target_default_kind'),
 });
 
 // ============================================================================

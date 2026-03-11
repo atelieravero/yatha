@@ -1,10 +1,8 @@
 "use client";
 
 import { useState, useEffect, useTransition } from "react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import MediaUploader from "@/components/MediaUploader";
-import { createNode, searchGraphNodes } from "@/app/actions";
+import { createNode, searchGraphNodes, checkDuplicateArtifact, getUploadTicket, attachFileToNode } from "@/app/actions";
 import { getMediaDetails } from "@/lib/mediaUtils";
 
 type Node = {
@@ -16,11 +14,7 @@ type Node = {
   properties?: Record<string, any>;
 };
 
-type Kind = {
-  id: string;
-  label: string;
-  icon: string;
-};
+type Kind = { id: string; label: string; icon: string; };
 
 export default function Sidebar({ 
   initialNodes = [],
@@ -33,21 +27,27 @@ export default function Sidebar({
   const router = useRouter();
   const activeNodeId = searchParams.get("node");
 
+  // --- Search State ---
   const [searchTerm, setSearchTerm] = useState("");
   const [searchedNodes, setSearchedNodes] = useState<Node[] | null>(null);
-  const [isSearching, startTransition] = useTransition();
+  const [isSearching, startTransitionSearch] = useTransition();
 
-  // Two-Track Creation State
-  const [isMintingTrack1, setIsMintingTrack1] = useState(false);
-  const [isUploadingTrack2, setIsUploadingTrack2] = useState(false);
-  
-  const [newLabel, setNewLabel] = useState("");
-  const [newKindLayer, setNewKindLayer] = useState(""); // Format: "LAYER|KIND"
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  // --- 4-Gateway Creation State (Replacing Legacy 2-Track) ---
+  const [isMinting, setIsMinting] = useState(false);
+  const [step, setStep] = useState<'GATEWAY' | 'FORM'>('GATEWAY');
+  const [activeGateway, setActiveGateway] = useState<'IDENTITY' | 'PHYSICAL' | 'FILE' | 'URL' | null>(null);
+  const [isSubmitting, startTransitionSubmit] = useTransition();
+
+  const [mintLabel, setMintLabel] = useState("");
+  const [mintKind, setMintKind] = useState(""); 
+  const [file, setFile] = useState<File | null>(null);
+  const [payloadHash, setPayloadHash] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
+  const [duplicateFound, setDuplicateFound] = useState<any | null>(null);
 
   useEffect(() => {
     if (searchTerm.trim().length > 1) {
-      startTransition(async () => {
+      startTransitionSearch(async () => {
         const results = await searchGraphNodes(searchTerm.trim());
         setSearchedNodes(results as Node[]);
       });
@@ -67,7 +67,6 @@ export default function Sidebar({
   // ============================================================================
   // STRICT 3-LAYER UI GROUPING
   // ============================================================================
-  
   const identitiesByKind = filteredNodes
     .filter((n) => n.layer === "IDENTITY")
     .reduce((acc, node) => {
@@ -79,12 +78,10 @@ export default function Sidebar({
 
   const physicalNodes = filteredNodes.filter((n) => n.layer === "PHYSICAL");
   
-  // Media grouping leveraging our centralized utility
   const mediaByFormat = filteredNodes
     .filter((n) => n.layer === "MEDIA")
     .reduce((acc, node) => {
       const { format, icon } = getMediaDetails(node.properties);
-      
       if (!acc[format]) acc[format] = { icon, nodes: [] };
       acc[format].nodes.push(node);
       return acc;
@@ -96,25 +93,101 @@ export default function Sidebar({
     return { label: kindId || 'Unclassified', icon: '🟣' };
   };
 
-  const handleTrack1Submit = async () => {
-    if (!newLabel.trim() || !newKindLayer) return;
-    try {
-      setIsSubmitting(true);
-      const [layer, kind] = newKindLayer.split('|');
-      
-      // If PHYSICAL, kind is passed as null to the DB.
-      const parsedKind = kind === "null" ? null : kind;
-      const newId = await createNode(newLabel.trim(), layer as any, parsedKind);
-      
-      setIsMintingTrack1(false);
-      setNewLabel("");
-      setNewKindLayer("");
-      router.push(`/?node=${newId}`);
-    } catch (error) {
-      console.error("Failed to create node:", error);
-    } finally {
-      setIsSubmitting(false);
+  // ============================================================================
+  // GLOBAL MINTING HANDLERS
+  // ============================================================================
+  const resetMinting = () => {
+    setIsMinting(false);
+    setStep('GATEWAY');
+    setActiveGateway(null);
+    setMintLabel("");
+    setMintKind("");
+    setFile(null);
+    setPayloadHash("");
+    setDuplicateFound(null);
+    setIsDragging(false);
+  };
+
+  const handleGatewaySelect = (gateway: 'IDENTITY' | 'PHYSICAL' | 'FILE' | 'URL') => {
+    setActiveGateway(gateway);
+    setStep('FORM');
+  };
+
+  // Drag & Drop Handlers for File Gateway
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); };
+  const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); };
+  const handleDropForm = (e: React.DragEvent) => {
+    e.preventDefault(); e.stopPropagation(); setIsDragging(false);
+    const droppedFile = e.dataTransfer.files?.[0];
+    if (droppedFile) { setFile(droppedFile); setMintLabel(droppedFile.name); }
+  };
+
+  const processFormSubmit = async () => {
+    if (!activeGateway) return;
+
+    if (activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') {
+      // Soft Dedupe (Now Alias-Aware!)
+      const normalizedMintLabel = mintLabel.toLowerCase().trim();
+      const exactMatch = initialNodes.find(n => 
+        n.layer === activeGateway && 
+        (
+          n.label.toLowerCase() === normalizedMintLabel || 
+          (n.aliases && n.aliases.some(alias => alias.toLowerCase() === normalizedMintLabel))
+        )
+      );
+
+      if (exactMatch) {
+        setDuplicateFound(exactMatch);
+        return; 
+      }
+      executeGlobalMint();
+    } 
+    else if (activeGateway === 'FILE' || activeGateway === 'URL') {
+      // Hard Dedupe
+      if (activeGateway === 'FILE' && file) {
+        const buffer = await file.arrayBuffer();
+        const hashBuf = await crypto.subtle.digest('SHA-256', buffer);
+        const hex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+        setPayloadHash(hex);
+        
+        const existing = await checkDuplicateArtifact(hex);
+        if (existing) { setDuplicateFound(existing); return; }
+      } else if (activeGateway === 'URL') {
+        let hash = mintLabel.trim();
+        const ytMatch = hash.match(/(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
+        if (ytMatch && ytMatch[1]) hash = `youtube:${ytMatch[1]}`;
+        
+        setPayloadHash(hash);
+        const existing = await checkDuplicateArtifact(hash);
+        if (existing) { setDuplicateFound(existing); return; }
+      }
+      executeGlobalMint();
     }
+  };
+
+  const executeGlobalMint = () => {
+    startTransitionSubmit(async () => {
+      let finalTargetId = ""; 
+
+      if (activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') {
+        finalTargetId = await createNode(mintLabel.trim(), activeGateway, activeGateway === 'IDENTITY' ? mintKind : null);
+      } 
+      else if (activeGateway === 'FILE' && file) {
+        finalTargetId = await createNode(mintLabel.trim() || file.name, "MEDIA", null);
+        const { uploadUrl, fileUrl } = await getUploadTicket(file.name, file.type);
+        if (uploadUrl && uploadUrl !== 'mock') {
+          await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
+        }
+        await attachFileToNode(finalTargetId, fileUrl, file.type, file.size, payloadHash);
+      } 
+      else if (activeGateway === 'URL') {
+        finalTargetId = await createNode(mintLabel.trim(), "MEDIA", null);
+        await attachFileToNode(finalTargetId, payloadHash.startsWith('youtube:') ? '' : mintLabel.trim(), 'text/html', 0, payloadHash);
+      }
+
+      resetMinting();
+      if (finalTargetId) router.push(`/?node=${finalTargetId}`);
+    });
   };
 
   return (
@@ -142,71 +215,125 @@ export default function Sidebar({
         </div>
       </div>
 
-      <div className="px-4 pb-4 border-b border-gray-100 flex gap-2">
+      {/* GLOBAL MINTING BUTTON */}
+      <div className="px-4 pb-4 border-b border-gray-100 flex">
         <button 
-          onClick={() => { setIsMintingTrack1(true); setIsUploadingTrack2(false); }}
+          onClick={() => { setIsMinting(true); setStep('GATEWAY'); }}
           className="flex-1 flex flex-col items-center justify-center py-2 bg-gray-900 text-white rounded shadow-sm hover:bg-gray-800 transition-colors cursor-pointer"
         >
-          <span className="text-[10px] font-bold uppercase tracking-widest leading-none mb-0.5 flex items-center gap-1"><span className="text-sm leading-none">+</span> Mint</span>
-          <span className="text-[9px] text-gray-400 font-medium">Concept / Item</span>
-        </button>
-        <button 
-          onClick={() => { setIsUploadingTrack2(true); setIsMintingTrack1(false); }}
-          className="flex-1 flex flex-col items-center justify-center py-2 bg-white border border-gray-200 text-gray-700 rounded shadow-sm hover:bg-gray-50 transition-colors cursor-pointer"
-        >
-          <span className="text-[10px] font-bold uppercase tracking-widest leading-none mb-0.5 flex items-center gap-1"><span className="text-sm leading-none">☁️</span> Upload</span>
-          <span className="text-[9px] text-gray-500 font-medium">Media / Link</span>
+          <span className="text-[10px] font-bold uppercase tracking-widest leading-none mb-0.5 flex items-center gap-1"><span className="text-sm leading-none">+</span> Add to Archive</span>
         </button>
       </div>
 
-      {isMintingTrack1 && (
-        <div className="p-4 border-b border-gray-200 bg-blue-50/30 animate-in fade-in slide-in-from-top-2">
+      {/* 4-GATEWAY GLOBAL MINTING PANEL */}
+      {isMinting && (
+        <div className="p-4 border-b border-gray-200 bg-gray-50/80 animate-in fade-in slide-in-from-top-2 relative shadow-inner">
           <div className="flex justify-between items-center mb-3">
-            <label className="text-[10px] font-bold text-blue-800 uppercase tracking-widest">✨ Mint New Record</label>
-            <button onClick={() => setIsMintingTrack1(false)} className="text-gray-400 hover:text-gray-900 cursor-pointer">✕</button>
+            <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest">
+              {step === 'GATEWAY' ? "✨ Select Format" : "✨ Mint New Record"}
+            </label>
+            <button onClick={resetMinting} disabled={isSubmitting} className="text-gray-400 hover:text-gray-900 cursor-pointer">✕</button>
           </div>
-          
-          <input 
-            autoFocus
-            type="text" 
-            placeholder="Name / Title..." 
-            value={newLabel} 
-            onChange={e => setNewLabel(e.target.value)} 
-            disabled={isSubmitting}
-            className="w-full text-sm p-2 border border-blue-200 rounded bg-white mb-2 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
-          />
-          
-          <select 
-            value={newKindLayer} 
-            onChange={e => setNewKindLayer(e.target.value)}
-            disabled={isSubmitting}
-            className="w-full text-xs p-2 border border-blue-200 rounded bg-white mb-3 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
-          >
-            <option value="">-- Select Classification --</option>
-            <optgroup label="Identities (Concepts, People, Works)">
-               {activeKinds.map(k => <option key={k.id} value={`IDENTITY|${k.id}`}>{k.icon} {k.label}</option>)}
-            </optgroup>
-            <option value="PHYSICAL|null">📦 Physical Item / Container</option>
-          </select>
-          
-          <div className="flex justify-end gap-2">
-             <button onClick={() => setIsMintingTrack1(false)} disabled={isSubmitting} className="text-xs text-gray-500 px-3 py-1.5 hover:text-gray-800 cursor-pointer">Cancel</button>
-             <button onClick={handleTrack1Submit} disabled={!newLabel || !newKindLayer || isSubmitting} className="text-xs bg-blue-600 text-white px-4 py-1.5 rounded font-bold disabled:opacity-50 cursor-pointer shadow-sm">
-               {isSubmitting ? "Minting..." : "Mint Record"}
-             </button>
-          </div>
+
+          {step === 'GATEWAY' && (
+            <div className="animate-in slide-in-from-right-2">
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => handleGatewaySelect('IDENTITY')} className="p-3 border border-gray-200 bg-white rounded-lg hover:border-blue-300 hover:bg-blue-50 text-left transition-colors cursor-pointer shadow-sm">
+                  <span className="block text-xl mb-1">🟣</span>
+                  <span className="font-bold text-xs text-gray-900 block">Concept</span>
+                  <span className="text-[9px] text-gray-500">People, Works</span>
+                </button>
+                <button onClick={() => handleGatewaySelect('PHYSICAL')} className="p-3 border border-gray-200 bg-white rounded-lg hover:border-amber-300 hover:bg-amber-50 text-left transition-colors cursor-pointer shadow-sm">
+                  <span className="block text-xl mb-1">📦</span>
+                  <span className="font-bold text-xs text-gray-900 block">Physical</span>
+                  <span className="text-[9px] text-gray-500">Tangible Items</span>
+                </button>
+                <button onClick={() => handleGatewaySelect('FILE')} className="p-3 border border-gray-200 bg-white rounded-lg hover:border-emerald-300 hover:bg-emerald-50 text-left transition-colors cursor-pointer shadow-sm">
+                  <span className="block text-xl mb-1">📄</span>
+                  <span className="font-bold text-xs text-gray-900 block">Upload</span>
+                  <span className="text-[9px] text-gray-500">Files, Media</span>
+                </button>
+                <button onClick={() => handleGatewaySelect('URL')} className="p-3 border border-gray-200 bg-white rounded-lg hover:border-blue-300 hover:bg-blue-50 text-left transition-colors cursor-pointer shadow-sm">
+                  <span className="block text-xl mb-1">🔗</span>
+                  <span className="font-bold text-xs text-gray-900 block">Web URL</span>
+                  <span className="text-[9px] text-gray-500">External Links</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 'FORM' && activeGateway && (
+            <div className="animate-in slide-in-from-right-2">
+              
+              {(activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
+                <div className="space-y-2 mb-3">
+                  <input type="text" autoFocus placeholder="Name / Primary Label..." value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isSubmitting} className="w-full p-2 text-xs border border-gray-200 rounded focus:ring-2 focus:ring-blue-500 outline-none bg-white shadow-sm" />
+                  {activeGateway === 'IDENTITY' && (
+                    <select value={mintKind} onChange={e => setMintKind(e.target.value)} disabled={isSubmitting} className="w-full p-2 text-xs border border-gray-200 rounded focus:ring-2 focus:ring-blue-500 bg-white shadow-sm outline-none">
+                      <option value="">Select Classification...</option>
+                      {activeKinds.map(k => <option key={k.id} value={k.id}>{k.icon} {k.label}</option>)}
+                    </select>
+                  )}
+                </div>
+              )}
+
+              {activeGateway === 'FILE' && (
+                <div onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDropForm} className="mb-3">
+                  <input type="file" className="hidden" id="sb-file" onChange={e => { if (e.target.files?.[0]) { setFile(e.target.files[0]); setMintLabel(e.target.files[0].name); } }} />
+                  <label htmlFor="sb-file" className={`block p-4 rounded-md border-2 border-dashed text-center transition-colors cursor-pointer ${isDragging ? 'border-blue-400 bg-blue-50' : 'border-gray-300 bg-white hover:bg-gray-50 hover:border-gray-400'}`}>
+                    <span className="text-xl mb-1 block">{file ? '✅' : isDragging ? '📥' : '📄'}</span>
+                    <span className="text-[10px] text-gray-600 font-medium">{file ? file.name : 'Click or drop file here'}</span>
+                  </label>
+                  {file && (
+                    <input type="text" placeholder="Artifact Title..." value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isSubmitting} className="w-full p-2 mt-2 text-xs border border-gray-200 rounded focus:ring-2 focus:ring-blue-500 outline-none bg-white shadow-sm" />
+                  )}
+                </div>
+              )}
+
+              {activeGateway === 'URL' && (
+                <div className="mb-3">
+                  <input type="url" autoFocus placeholder="https://" value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isSubmitting} className="w-full p-2 text-xs border border-gray-200 rounded focus:ring-2 focus:ring-blue-500 mb-1 outline-none bg-white shadow-sm" />
+                  <p className="text-[9px] text-gray-400 font-medium">YouTube URLs convert into iframes.</p>
+                </div>
+              )}
+
+              {/* Dedupe Warning */}
+              {duplicateFound && (
+                <div className="p-2 mb-3 bg-amber-50 border border-amber-200 rounded-md">
+                  <p className="text-[10px] font-bold text-amber-800 mb-0.5 flex items-center gap-1"><span>⚠️</span> Exact Match Found</p>
+                  <p className="text-[9px] text-amber-700 mb-2">
+                    "{duplicateFound.label}"
+                    {duplicateFound.aliases && duplicateFound.aliases.length > 0 && (
+                      <span className="opacity-80"> ({duplicateFound.aliases.join(', ')})</span>
+                    )} exists.
+                  </p>
+                  <div className="flex gap-1">
+                    <button onClick={() => { router.push(`/?node=${duplicateFound.id}`); resetMinting(); }} className="flex-1 py-1 bg-amber-600 text-white text-[10px] font-bold rounded hover:bg-amber-700 cursor-pointer">Go to Record</button>
+                    {(activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
+                      <button onClick={executeGlobalMint} className="flex-1 py-1 bg-white text-amber-700 border border-amber-200 text-[10px] font-bold rounded hover:bg-amber-100 cursor-pointer">Mint Duplicate</button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+                <button onClick={() => setStep('GATEWAY')} disabled={isSubmitting} className="text-xs text-gray-500 hover:text-gray-800 cursor-pointer">← Back</button>
+                {!duplicateFound && (
+                  <button 
+                    onClick={processFormSubmit} 
+                    disabled={isSubmitting || (activeGateway === 'IDENTITY' && (!mintLabel || !mintKind)) || (activeGateway === 'PHYSICAL' && !mintLabel) || (activeGateway === 'FILE' && !file) || (activeGateway === 'URL' && !mintLabel)}
+                    className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded shadow-sm disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSubmitting ? "..." : "Mint Record"}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {isUploadingTrack2 && (
-        <div className="animate-in fade-in">
-           <MediaUploader asButton={false} />
-           <div className="p-4 border-b border-gray-200 flex justify-center bg-gray-50">
-               <button onClick={() => setIsUploadingTrack2(false)} className="text-xs font-medium text-gray-500 hover:text-gray-800 cursor-pointer">Cancel Global Upload</button>
-           </div>
-        </div>
-      )}
-
+      {/* GRAPH NAVIGATION */}
       <div className="flex-1 overflow-y-auto p-4 space-y-8">
         
         {/* 1. IDENTITIES */}

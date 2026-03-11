@@ -93,6 +93,24 @@ Before adding a new predicate, check if an existing one already covers the meani
 
 * In a graph, the context often does the heavy lifting: `[Person] -> created -> [Book]` obviously implies writing. Keep your vocabulary lean.
 
+### E. Restricting Layers & Setting Defaults (The Magic Feature)
+
+When you create a Predicate, you can configure exactly what layers are allowed to be the Source or Target. **This directly programs the Universal Builder UI.**
+
+* **Layer Restrictions (Hard Constraint):** If you restrict the target of "authored" to only allow `Concept`s and `Physical Item`s, the Universal Builder's search bar will completely filter out digital media from the results. It physically prevents invalid edges from being asserted.
+
+* **Default Classification (Soft Convenience):** If you set the Default Classification for the target to `Written Work`, the search is *not* restricted to written works (it searches all allowed layers). However, if the user clicks "+ Mint New Record", the system will automatically pre-select `Written Work` in the taxonomy dropdown to save them a click.
+
+*Example Workflow:* For the predicate `authored` / `authored by`:
+
+1. Restrict the "authored" (Source) side to `Concept` and set the default kind to `Person`.
+
+2. Restrict the "authored by" (Target) side to `Concept`, `Physical Item`, or `Media`, and set the default kind to `Written Work`.
+
+3. *Result:* When looking at a Person and asserting "authored", the system strictly searches for valid targets. If the user opts to mint a new node, it instantly opens the Concept form pre-filled to "Written Work".
+
+*Guidance:* Use these constraints aggressively! The tighter your predicate physics, the faster and more error-proof your data entry becomes.
+
 ## 4. System Core Rules (The Physics)
 
 As a reminder, you do not need to create Predicates for structural realities. The system handles these automatically:

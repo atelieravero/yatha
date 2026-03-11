@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { edges, predicates } from "@/db/schema";
+import { edges, predicates, kinds } from "@/db/schema";
 import PredicateDictionaryClient from "@/components/PredicateDictionaryClient";
 
 // Force fresh data on every load
@@ -11,6 +11,10 @@ export default async function PredicatesDictionaryPage() {
   
   // 2. Fetch all edges to calculate structural impact/usage
   const allEdges = await db.select({ predicateId: edges.predicateId }).from(edges);
+
+  // 3. Fetch active kinds to populate the "Default Kind" dropdowns in the builder config
+  const allKinds = await db.select().from(kinds).orderBy(kinds.label);
+  const activeKinds = allKinds.filter(k => k.isActive);
 
   // Aggregate edge counts per predicate
   const edgeCounts = allEdges.reduce((acc, edge) => {
@@ -43,7 +47,11 @@ export default async function PredicatesDictionaryPage() {
           Manage the semantic ontology (Edges). System core predicates control the physics of the graph and cannot be edited. Deactivating a semantic pair requires migrating existing connections to an active alternative.
         </p>
 
-        <PredicateDictionaryClient initialPredicates={allPredicates} edgeCounts={edgeCounts} />
+        <PredicateDictionaryClient 
+          initialPredicates={allPredicates} 
+          edgeCounts={edgeCounts} 
+          activeKinds={activeKinds} 
+        />
       </div>
     </div>
   );

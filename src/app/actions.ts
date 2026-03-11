@@ -150,22 +150,51 @@ export async function seedSystemPredicates() {
   }
 }
 
-export async function createPredicate(forwardLabel: string, reverseLabel: string, isSymmetric: boolean) {
+export async function createPredicate(
+  forwardLabel: string, 
+  reverseLabel: string, 
+  isSymmetric: boolean,
+  sourceLayers: string[] | null = null,
+  targetLayers: string[] | null = null,
+  sourceDefaultKind: string | null = null,
+  targetDefaultKind: string | null = null
+) {
   const [newPred] = await db.insert(predicates).values({
     forwardLabel, 
     reverseLabel: isSymmetric ? forwardLabel : reverseLabel, 
     isSymmetric, 
     isSystem: false, 
     isActive: true,
-  }).returning({ id: predicates.id }); // FIX: Return the ID so the UI can auto-select it!
+    sourceLayers,
+    targetLayers,
+    sourceDefaultKind,
+    targetDefaultKind
+  }).returning({ id: predicates.id }); 
   
   revalidatePath('/');
   return newPred.id;
 }
 
-export async function updatePredicate(id: string, forwardLabel: string, reverseLabel: string, isSymmetric: boolean) {
+export async function updatePredicate(
+  id: string, 
+  forwardLabel: string, 
+  reverseLabel: string, 
+  isSymmetric: boolean,
+  sourceLayers: string[] | null = null,
+  targetLayers: string[] | null = null,
+  sourceDefaultKind: string | null = null,
+  targetDefaultKind: string | null = null
+) {
   await db.update(predicates)
-    .set({ forwardLabel, reverseLabel: isSymmetric ? forwardLabel : reverseLabel, isSymmetric })
+    .set({ 
+      forwardLabel, 
+      reverseLabel: isSymmetric ? forwardLabel : reverseLabel, 
+      isSymmetric,
+      sourceLayers,
+      targetLayers,
+      sourceDefaultKind,
+      targetDefaultKind
+    })
     .where(eq(predicates.id, id));
   revalidatePath('/');
 }

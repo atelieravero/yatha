@@ -26,47 +26,40 @@ The database `nodes` table has a strict `layer` column:
 
 *Anti-Pattern:* Never use strings like `PHYSICAL_OBJECT` or `IMAGE` in the `kind` column.
 
-## 3. The Graph Physics (Edge Matrices)
+## 3. The Graph Physics & Predicate Constraints
 
 Edges strictly govern relationships.
 
-* **`CARRIES` (Structural):** \* `[PHYSICAL | MEDIA] -> CARRIES -> [IDENTITY]` (Bridges an artifact to its conceptual meaning).
+* **`CARRIES` (Structural):** `[PHYSICAL | MEDIA] -> CARRIES -> [IDENTITY]` or `[MEDIA] -> CARRIES -> [PHYSICAL]`.
 
-  * `[MEDIA] -> CARRIES -> [PHYSICAL]` (A digital file carries the representation of a specific physical item).
+* **`CONTAINS` (Aggregation):** `[PHYSICAL] -> CONTAINS -> [PHYSICAL]` or `[IDENTITY] -> CONTAINS -> [ANY]`.
 
-* **`CONTAINS` (Aggregation):** \* `[PHYSICAL] -> CONTAINS -> [PHYSICAL]`
+* **Semantics (User Defined):** Governed by the `predicates` table.
 
-  * `[IDENTITY] -> CONTAINS -> [ANY]`
+  * **Core Rule:** `PHYSICAL <-> PHYSICAL` and `MEDIA <-> MEDIA` are globally forbidden for semantic links to prevent graph hairballs.
 
-* **Semantics (User Defined):** \* **Legal:** `IDENTITY <-> IDENTITY`, `IDENTITY <-> PHYSICAL`, `IDENTITY <-> MEDIA`, `PHYSICAL <-> MEDIA`.
+  * **Dynamic Constraints:** The `predicates` table includes `sourceLayers`, `targetLayers`, `sourceDefaultKind`, and `targetDefaultKind` arrays. The UI strictly reads these to filter search results and pre-select dropdowns.
 
-  * **Forbidden:** `PHYSICAL <-> PHYSICAL` and `MEDIA <-> MEDIA` (Do not link peers of the same tangible/digital layer via semantics; use `CONTAINS` or link them conceptually instead to prevent graph hairballs).
+## 4. The 4-Gateway Creation Model
 
-*Note:* `LINEAGE` (`DERIVED_FROM`) and `REFERENCES` are DEPRECATED. Do not use them.
+We have completely unified global minting (Sidebar) and contextual linking (`UniversalBuilder`). Both use the exact same **4-Gateway System**:
 
-## 4. The Universal Builder Pattern
+1. **Concept (IDENTITY):** Opens a text form + Kind dropdown.
 
-Do not create bespoke modals for creating edges. ALL edge creation must flow through `<UniversalBuilder />` in `src/components/UniversalBuilder.tsx`.
-It accepts a strict `config` object:
+2. **Physical (PHYSICAL):** Opens a text form.
 
-```
-interface BuilderConfig {
-  mode: 'STRUCTURAL' | 'CONTAINMENT' | 'SEMANTIC';
-  direction?: 'FORWARD' | 'REVERSE'; // Optional. Omit for SEMANTIC modes!
-  allowedGateways: ('IDENTITY' | 'PHYSICAL' | 'FILE' | 'URL')[]; // The 4 Creation Doors
-  // ... ui props
-}
+3. **Upload (FILE):** Opens a drag-and-drop zone. Hashes locally. Hard dedupe logic.
 
-```
+4. **URL (MEDIA):** Opens a URL input. Hard dedupe logic. Converts YouTube URLs to standard hashes automatically.
 
-* **Strict Internal Physics:** The Builder intercepts the `allowedGateways` prop and filters them against reality using an `effectiveGateways` matrix. (e.g., if a parent component blindly requests a `PHYSICAL` door for a `CONTAINS` target on a `MEDIA` node, the Builder will actively hide it to prevent database corruption).
+### The Universal Builder (`src/components/UniversalBuilder.tsx`)
 
-* **Semantic Direction:** For `mode: 'SEMANTIC'`, the `direction` parameter is omitted entirely. The UI acts as a natural language sentence builder, and the exact directional arrow is dictated strictly by the user's verb selection (Forward vs. Reverse tag).
+It accepts a strict `config` object.
 
-* **Soft Dedupe:** If a user types a name matching an existing `IDENTITY` or `PHYSICAL` node, the Builder asks them to verify.
+* **Predicate-First Semantic Mode:** For `mode: 'SEMANTIC'`, the builder opens to Step 0 (Verb Selection). It dynamically filters the allowed targets and allowed gateways based strictly on the selected Predicate's database constraints.
 
-* **Hard Dedupe:** Media files are hashed locally (SHA-256) before upload. If the hash matches an existing `MEDIA` node, the system *forces* a link to the existing node.
+* **Auto-Select Prefill:** The builder initializes with the Active Node's name and utilizes `onFocus={e => e.target.select()}` to provide a frictionless bridging experience (allowing instant typing to overwrite, or arrow keys to append).
 
 ## 5. Event Sourcing & Safety
 
-Every destructive update to a node (`updateNodeProperties`, `updateNodeLabel`) must call `captureNodeSnapshot(nodeId)` FIRST. This inserts the previous state into `node_history`, allowing users to rewind time. Never execute an `UPDATE` on `nodes` without capturing the snapshot
+Every destructive update to a node (`updateNodeProperties`, `updateNodeLabel`) must call `captureNodeSnapshot(nodeId)` FIRST. This inserts the previous state into `node_history`, allowing users to rewind time. Never execute an `UPDATE` on `nodes` without capturing the snapshot.
