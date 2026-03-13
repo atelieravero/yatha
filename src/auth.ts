@@ -6,7 +6,6 @@ import { eq } from "drizzle-orm";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
-  trustHost: true, // <--- Added safely! Crucial for Coolify/Proxies
   callbacks: {
     // 1. The Sign-In Gatekeeper
     async signIn({ user }) {
