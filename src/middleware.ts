@@ -8,10 +8,11 @@ const { auth } = NextAuth(authConfig);
 export default auth((req) => {
   const isLoggedIn = !!req.auth;
   const isAuthRoute = req.nextUrl.pathname.startsWith('/api/auth');
+  const isLoginPage = req.nextUrl.pathname === '/login';
 
   // 1. Force Authentication: Bounce unauthorized users to the login screen
-  if (!isAuthRoute && !isLoggedIn) {
-    return NextResponse.redirect(new URL('/api/auth/signin', req.url));
+  if (!isLoggedIn && !isAuthRoute && !isLoginPage) {
+    return NextResponse.redirect(new URL('/login', req.url));
   }
 
   // 2. License Expiry Enforcement
