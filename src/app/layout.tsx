@@ -17,35 +17,39 @@ export default async function RootLayout({
   // 1. Fetch the active user session!
   const session = await auth();
 
-  // 2. Fetch the nodes from the database directly in the server layout
-  const rawNodes = await getRecentNodes();
+  // 2. Conditionally fetch data ONLY if logged in to prevent unnecessary DB queries on the login page
+  let nodes: any[] = [];
+  let activeKinds: any[] = [];
 
-  // Safely cast the raw nodes into the strict type expected by the Sidebar
-  const nodes = rawNodes.map(node => ({
-    id: node.id,
-    label: node.label,
-    layer: node.layer as "IDENTITY" | "PHYSICAL" | "MEDIA",
-    kind: node.kind,
-    aliases: node.aliases || [],
-    properties: (node.properties as Record<string, any>) || {}
-  }));
+  if (session) {
+    const rawNodes = await getRecentNodes();
+    nodes = rawNodes.map(node => ({
+      id: node.id,
+      label: node.label,
+      layer: node.layer as "IDENTITY" | "PHYSICAL" | "MEDIA",
+      kind: node.kind,
+      aliases: node.aliases || [],
+      properties: (node.properties as Record<string, any>) || {}
+    }));
 
-  // Fetch the active dictionary kinds for the sidebar's Track 1 Creation Dropdown
-  const allKinds = await getAllKinds();
-  const activeKinds = allKinds.filter(k => k.isActive);
+    const allKinds = await getAllKinds();
+    activeKinds = allKinds.filter(k => k.isActive);
+  }
 
   return (
     <html lang="en">
       <body className="antialiased bg-gray-50 text-gray-900 font-sans flex h-screen overflow-hidden">
-        {/* Pass the fetched nodes, kinds, and user context down to the client-side Sidebar */}
-        <Sidebar 
-          initialNodes={nodes} 
-          activeKinds={activeKinds} 
-          user={session?.user} 
-          licenseeName={process.env.LICENSEE_NAME}
-        />
+        {/* Conditionally render the Sidebar ONLY if the user is authenticated */}
+        {session && (
+          <Sidebar 
+            initialNodes={nodes} 
+            activeKinds={activeKinds} 
+            user={session.user} 
+            licenseeName={process.env.LICENSEE_NAME}
+          />
+        )}
         
-        {/* The Main Panel (page.tsx) fills the remaining space */}
+        {/* The Main Panel fills the remaining space */}
         <main className="flex-1 overflow-y-auto relative">
           {children}
         </main>
