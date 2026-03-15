@@ -11,7 +11,8 @@ export default function PropertiesEditor({
   initialProps,
   allNodes,
   notEarlierThan,
-  notLaterThan
+  notLaterThan,
+  canWrite = true
 }: {
   nodeId: string;
   layer: "IDENTITY" | "PHYSICAL" | "MEDIA";
@@ -20,6 +21,7 @@ export default function PropertiesEditor({
   allNodes: any[];
   notEarlierThan?: Date | null;
   notLaterThan?: Date | null;
+  canWrite?: boolean;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<Record<string, string>>(initialProps || {});
@@ -84,32 +86,34 @@ export default function PropertiesEditor({
   // Read-Only Mode - Compact, title-less presentation
   if (!isEditing) {
     return (
-      <div className="mb-6 p-4 bg-white border border-gray-200 rounded-xl shadow-sm text-sm text-gray-800 relative group transition-colors min-h-[60px]">
-        <button 
-          onClick={() => {
-             setIsEditing(true);
-             if (initialProps.temporal_input) {
-               const parsed = parseFuzzyTemporal(initialProps.temporal_input);
-               setLiveBounds({ start: parsed.notEarlierThan, end: parsed.notLaterThan });
-             }
-          }}
-          className="absolute top-3 right-3 text-[10px] font-bold uppercase tracking-widest text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity px-3 py-1.5 bg-blue-50 rounded cursor-pointer border border-blue-100 hover:bg-blue-100 z-10"
-        >
-          Edit ✎
-        </button>
+      <div className="mb-6 p-4 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl shadow-sm text-sm text-gray-800 dark:text-zinc-200 relative group transition-colors min-h-[60px]">
+        {canWrite && (
+          <button 
+            onClick={() => {
+               setIsEditing(true);
+               if (initialProps.temporal_input) {
+                 const parsed = parseFuzzyTemporal(initialProps.temporal_input);
+                 setLiveBounds({ start: parsed.notEarlierThan, end: parsed.notLaterThan });
+               }
+            }}
+            className="absolute top-3 right-3 text-[10px] font-bold uppercase tracking-widest text-blue-600 dark:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 rounded cursor-pointer border border-blue-100 dark:border-blue-800/50 hover:bg-blue-100 dark:hover:bg-blue-900/40 z-10"
+          >
+            Edit ✎
+          </button>
+        )}
         
         {/* IDENTITY Presentation */}
         {layer === 'IDENTITY' ? (
           <div className="flex flex-col gap-1 pr-16">
             <div className="flex flex-wrap items-baseline gap-3">
-              {initialProps.temporal_input && <span className="font-semibold text-gray-900">{initialProps.temporal_input}</span>}
-              {initialProps.standardized_id && <span className="font-mono text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{initialProps.standardized_id}</span>}
+              {initialProps.temporal_input && <span className="font-semibold text-gray-900 dark:text-zinc-100">{initialProps.temporal_input}</span>}
+              {initialProps.standardized_id && <span className="font-mono text-xs text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">{initialProps.standardized_id}</span>}
               {!initialProps.temporal_input && !initialProps.standardized_id && displayProps.length === 0 && (
-                <span className="italic text-gray-400 text-xs">No intrinsic properties defined.</span>
+                <span className="italic text-gray-400 dark:text-zinc-500 text-xs">No intrinsic properties defined.</span>
               )}
             </div>
             {initialProps.notes && (
-              <div className="text-gray-600 text-sm line-clamp-1 hover:line-clamp-none cursor-pointer mt-0.5 transition-all" title="Click to expand full notes">
+              <div className="text-gray-600 dark:text-zinc-400 text-sm line-clamp-1 hover:line-clamp-none cursor-pointer mt-0.5 transition-all" title="Click to expand full notes">
                 {initialProps.notes}
               </div>
             )}
@@ -118,12 +122,12 @@ export default function PropertiesEditor({
           /* PHYSICAL & MEDIA Presentation */
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pr-16">
              {displayProps.length === 0 && !initialProps.temporal_input ? (
-               <span className="italic text-gray-400 text-xs">No intrinsic properties defined.</span>
+               <span className="italic text-gray-400 dark:text-zinc-500 text-xs">No intrinsic properties defined.</span>
              ) : (
                <>
-                 {initialProps.temporal_input && <span className="font-semibold text-gray-900">{initialProps.temporal_input}</span>}
+                 {initialProps.temporal_input && <span className="font-semibold text-gray-900 dark:text-zinc-100">{initialProps.temporal_input}</span>}
                  {displayProps.map(([key, val]) => (
-                   <span key={key} className={key === 'hash' || key === 'url' ? "text-gray-500 font-mono text-[10px] break-all bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded" : "text-gray-800 font-medium"}>
+                   <span key={key} className={key === 'hash' || key === 'url' ? "text-gray-500 dark:text-zinc-400 font-mono text-[10px] break-all bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 px-1.5 py-0.5 rounded" : "text-gray-800 dark:text-zinc-200 font-medium"}>
                      {String(val)}
                    </span>
                  ))}
@@ -137,8 +141,8 @@ export default function PropertiesEditor({
 
   // Edit Mode
   return (
-    <div className="mb-6 p-5 bg-white border border-blue-200 rounded-xl shadow-sm text-sm animate-in fade-in slide-in-from-top-2">
-      <h3 className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-5 flex items-center gap-1.5">
+    <div className="mb-6 p-5 bg-white dark:bg-zinc-900 border border-blue-200 dark:border-blue-800/50 rounded-xl shadow-sm text-sm animate-in fade-in slide-in-from-top-2 transition-colors">
+      <h3 className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest mb-5 flex items-center gap-1.5">
         <span>✏️</span> Edit Properties
       </h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -154,7 +158,7 @@ export default function PropertiesEditor({
 
           return (
             <div key={key} className={isNotes || key === 'hash' || key === 'url' || isTemporal ? "sm:col-span-2" : ""}>
-              <label className="font-bold text-gray-500 uppercase tracking-wider text-[10px] mb-1.5 block">
+              <label className="font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-wider text-[10px] mb-1.5 block">
                 {displayLabel} {isSystemLocked && "(Locked)"}
               </label>
               
@@ -163,7 +167,7 @@ export default function PropertiesEditor({
                   value={formData[key] || ''}
                   onChange={(e) => setFormData({ ...formData, [key]: e.target.value })}
                   disabled={isPending || isSystemLocked}
-                  className="w-full p-2.5 text-xs border border-gray-200 rounded-md focus:ring-2 focus:ring-blue-500 min-h-[80px] focus:outline-none shadow-sm text-gray-900"
+                  className="w-full p-2.5 text-xs border border-gray-200 dark:border-zinc-700 rounded-md focus:ring-2 focus:ring-blue-500 min-h-[80px] focus:outline-none shadow-sm text-gray-900 dark:text-zinc-100 bg-white dark:bg-zinc-900 transition-colors"
                   placeholder={`Enter ${displayLabel}...`}
                 />
               ) : (
@@ -174,7 +178,7 @@ export default function PropertiesEditor({
                     value={formData[key] || ''}
                     onChange={(e) => setFormData({ ...formData, [key]: e.target.value })}
                     disabled={isPending || isSystemLocked}
-                    className={`w-full p-2.5 text-xs border border-gray-200 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm ${isSystemLocked ? 'bg-gray-50 text-gray-400 font-mono text-[10px] cursor-not-allowed' : 'bg-white text-gray-900'}`}
+                    className={`w-full p-2.5 text-xs border border-gray-200 dark:border-zinc-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm transition-colors ${isSystemLocked ? 'bg-gray-50 dark:bg-zinc-800/50 text-gray-400 dark:text-zinc-500 font-mono text-[10px] cursor-not-allowed' : 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100'}`}
                     placeholder={isSystemLocked ? 'System Locked' : (isTemporal ? 'e.g. 1990s, 1985~1988' : `e.g. input data...`)}
                   />
                   {!isSystemLocked && !isTemporal && (
@@ -184,11 +188,11 @@ export default function PropertiesEditor({
                   )}
                   
                   {isTemporal && (formData[key] || liveBounds.start || liveBounds.end) && (
-                    <div className="mt-2.5 bg-emerald-50/50 border border-emerald-100 p-2.5 rounded-md w-fit">
-                      <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-widest block mb-1">
+                    <div className="mt-2.5 bg-emerald-50/50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/30 p-2.5 rounded-md w-fit">
+                      <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-400 uppercase tracking-widest block mb-1">
                         ↳ System Boundaries:
                       </span>
-                      <div className="font-mono text-[10px] text-emerald-900 flex flex-col gap-0.5">
+                      <div className="font-mono text-[10px] text-emerald-900 dark:text-emerald-300 flex flex-col gap-0.5">
                         <span>Not earlier than: <strong className="font-bold ml-1">{liveBounds.start ? liveBounds.start.toISOString().split('T')[0] : 'Open'}</strong></span>
                         <span>Not later than: <strong className="font-bold ml-3">{liveBounds.end ? liveBounds.end.toISOString().split('T')[0] : 'Open'}</strong></span>
                       </div>
@@ -201,11 +205,11 @@ export default function PropertiesEditor({
         })}
       </div>
       
-      <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-gray-100">
+      <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-gray-100 dark:border-zinc-800">
         <button 
           onClick={() => { setFormData(initialProps); setIsEditing(false); }}
           disabled={isPending}
-          className="px-4 py-2 text-gray-500 hover:text-gray-800 transition-colors text-xs font-medium cursor-pointer"
+          className="px-4 py-2 text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200 transition-colors text-xs font-medium cursor-pointer"
         >
           Cancel
         </button>

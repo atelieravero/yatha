@@ -119,29 +119,29 @@ export default function DictionaryClient({
       
       {/* LEFT COLUMN: Creation Form */}
       <div className="lg:col-span-1 space-y-6">
-        <div className="bg-blue-50/50 border border-blue-200 rounded-xl p-5 shadow-sm">
-          <h2 className="text-sm font-bold text-blue-800 uppercase tracking-widest mb-4 flex items-center gap-2">
+        <div className="bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/50 rounded-xl p-5 shadow-sm transition-colors">
+          <h2 className="text-sm font-bold text-blue-800 dark:text-blue-400 uppercase tracking-widest mb-4 flex items-center gap-2">
             <span>✨</span> Mint New Kind
           </h2>
           
           <div className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Classification Label</label>
+              <label className="block text-xs font-bold text-gray-500 dark:text-zinc-400 uppercase mb-1">Classification Label</label>
               <input
                 type="text"
                 placeholder="e.g. Person, Artwork"
                 value={newLabel}
                 onChange={(e) => { setNewLabel(e.target.value); setCreateError(null); }}
                 disabled={isPending}
-                className="w-full p-2 text-sm border border-blue-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors"
               />
               {createError && (
-                <p className="text-xs text-red-500 font-medium mt-1">{createError}</p>
+                <p className="text-xs text-red-500 dark:text-red-400 font-medium mt-1">{createError}</p>
               )}
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Emoji / Icon</label>
+              <label className="block text-xs font-bold text-gray-500 dark:text-zinc-400 uppercase mb-1">Emoji / Icon</label>
               <div className="flex flex-col gap-2">
                 <input
                   type="text"
@@ -149,18 +149,18 @@ export default function DictionaryClient({
                   value={newIcon}
                   onChange={(e) => setNewIcon(e.target.value)}
                   disabled={isPending}
-                  className="w-16 p-2 text-center text-xl border border-blue-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                  className="w-16 p-2 text-center text-xl border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors"
                 />
                 
                 {/* Lightweight Emoji Picker */}
-                <div className="flex flex-wrap gap-1.5 p-2 bg-white border border-blue-100 rounded-md shadow-inner">
+                <div className="flex flex-wrap gap-1.5 p-2 bg-white dark:bg-zinc-900 border border-blue-100 dark:border-blue-800/50 rounded-md shadow-inner transition-colors">
                   {EMOJI_GRID.map(emoji => (
                     <button
                       key={emoji}
                       type="button"
                       onClick={() => setNewIcon(emoji)}
                       disabled={isPending}
-                      className="w-7 h-7 flex items-center justify-center bg-gray-50 border border-gray-200 rounded hover:bg-blue-100 hover:border-blue-300 transition-colors text-sm cursor-pointer shadow-sm"
+                      className="w-7 h-7 flex items-center justify-center bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded hover:bg-blue-100 dark:hover:bg-blue-900/40 hover:border-blue-300 dark:hover:border-blue-700/50 transition-colors text-sm cursor-pointer shadow-sm"
                       title={`Select ${emoji}`}
                     >
                       {emoji}
@@ -173,7 +173,7 @@ export default function DictionaryClient({
             <button
               onClick={handleCreate}
               disabled={isPending || !newLabel.trim()}
-              className="w-full px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm cursor-pointer mt-2"
+              className="w-full px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white text-sm font-medium rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 transition-colors shadow-sm cursor-pointer mt-2"
             >
               {isPending ? "Minting..." : "Create Classification"}
             </button>
@@ -184,13 +184,13 @@ export default function DictionaryClient({
       {/* RIGHT COLUMN: Active Dictionary */}
       <div className="lg:col-span-2 space-y-6">
         <div>
-          <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+          <h2 className="text-lg font-bold text-gray-900 dark:text-zinc-100 mb-4 flex items-center gap-2">
             <span>📖</span> Active Classifications
           </h2>
           
           <div className="space-y-3">
             {activeKinds.length === 0 && (
-              <p className="text-sm text-gray-400 italic p-4 border border-dashed rounded-lg">No active classifications found.</p>
+              <p className="text-sm text-gray-400 dark:text-zinc-500 italic p-4 border border-dashed dark:border-zinc-800 rounded-lg">No active classifications found.</p>
             )}
             
             {activeKinds.map(kind => {
@@ -199,7 +199,7 @@ export default function DictionaryClient({
               const isEditing = editingId === kind.id;
 
               return (
-                <div key={kind.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm transition-all hover:shadow-md">
+                <div key={kind.id} className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg p-4 shadow-sm transition-all hover:shadow-md">
                   
                   {isEditing ? (
                     <div className="flex flex-col gap-2 animate-in fade-in">
@@ -209,38 +209,38 @@ export default function DictionaryClient({
                           maxLength={2}
                           value={editIcon}
                           onChange={(e) => setEditIcon(e.target.value)}
-                          className="w-14 p-1.5 text-center text-xl border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                          className="w-14 p-1.5 text-center text-xl border border-blue-300 dark:border-blue-700/50 rounded bg-transparent dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none transition-colors"
                         />
                         <input
                           type="text"
                           value={editLabel}
                           onChange={(e) => { setEditLabel(e.target.value); setEditError(null); }}
-                          className="flex-1 p-2 text-sm border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 outline-none font-bold text-gray-900"
+                          className="flex-1 p-2 text-sm border border-blue-300 dark:border-blue-700/50 rounded bg-transparent dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none font-bold transition-colors"
                         />
                         <button 
                           onClick={() => handleEditSave(kind.id)}
                           disabled={isPending}
-                          className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
+                          className="px-3 py-1.5 bg-blue-600 dark:bg-blue-500 text-white text-xs font-bold rounded hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 cursor-pointer transition-colors"
                         >
                           {isPending ? "..." : "Save"}
                         </button>
                         <button 
                           onClick={() => { setEditingId(null); setEditError(null); }}
                           disabled={isPending}
-                          className="px-3 py-1.5 text-gray-500 text-xs font-bold hover:text-gray-800 cursor-pointer"
+                          className="px-3 py-1.5 text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200 text-xs font-bold cursor-pointer transition-colors"
                         >
                           Cancel
                         </button>
                       </div>
                       
                       {/* Inline Emoji Grid for Quick Editing */}
-                      <div className="flex flex-wrap gap-1 bg-gray-50 p-1.5 rounded-md border border-gray-200 w-fit">
+                      <div className="flex flex-wrap gap-1 bg-gray-50 dark:bg-zinc-800/50 p-1.5 rounded-md border border-gray-200 dark:border-zinc-700 w-fit transition-colors">
                         {EMOJI_GRID.map(emoji => (
                           <button
                             key={emoji}
                             type="button"
                             onClick={() => setEditIcon(emoji)}
-                            className="w-6 h-6 flex items-center justify-center bg-white border border-gray-200 rounded hover:bg-blue-100 transition-colors text-xs cursor-pointer shadow-sm"
+                            className="w-6 h-6 flex items-center justify-center bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors text-xs cursor-pointer shadow-sm"
                           >
                             {emoji}
                           </button>
@@ -248,7 +248,7 @@ export default function DictionaryClient({
                       </div>
 
                       {editError && (
-                        <p className="text-xs text-red-500 font-medium mt-1">{editError}</p>
+                        <p className="text-xs text-red-500 dark:text-red-400 font-medium mt-1">{editError}</p>
                       )}
                     </div>
                   ) : (
@@ -256,12 +256,12 @@ export default function DictionaryClient({
                       <div className="flex items-center gap-3">
                         <span className="text-2xl">{kind.icon}</span>
                         <div>
-                          <h3 className="font-bold text-gray-900">{kind.label}</h3>
+                          <h3 className="font-bold text-gray-900 dark:text-zinc-100">{kind.label}</h3>
                         </div>
                       </div>
                       
                       <div className="flex items-center gap-3">
-                        <span className="text-xs font-medium px-2.5 py-1 bg-gray-100 text-gray-600 rounded-full">
+                        <span className="text-xs font-medium px-2.5 py-1 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 rounded-full transition-colors">
                           {count} {count === 1 ? 'node' : 'nodes'}
                         </span>
                         
@@ -269,7 +269,7 @@ export default function DictionaryClient({
                           <button
                             onClick={() => handleEditStart(kind)}
                             disabled={isPending || isMigrating}
-                            className="text-xs font-bold text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded transition-colors cursor-pointer"
+                            className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 px-2.5 py-1.5 rounded transition-colors cursor-pointer"
                           >
                             Edit
                           </button>
@@ -282,7 +282,7 @@ export default function DictionaryClient({
                                 }
                               }}
                               disabled={isPending}
-                              className="text-xs font-bold text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded transition-colors cursor-pointer"
+                              className="text-xs font-bold text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-2.5 py-1.5 rounded transition-colors cursor-pointer"
                             >
                               Deactivate
                             </button>
@@ -293,7 +293,7 @@ export default function DictionaryClient({
                                 setEditingId(null);
                               }}
                               disabled={isPending}
-                              className="text-xs font-bold text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded transition-colors cursor-pointer"
+                              className="text-xs font-bold text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-2.5 py-1.5 rounded transition-colors cursor-pointer"
                             >
                               {isMigrating ? "Cancel" : "Deactivate"}
                             </button>
@@ -304,8 +304,8 @@ export default function DictionaryClient({
                   )}
 
                   {isMigrating && (
-                    <div className="mt-4 pt-4 border-t border-red-100 bg-red-50/50 -mx-4 -mb-4 p-4 rounded-b-lg animate-in slide-in-from-top-2">
-                      <p className="text-xs text-red-800 font-medium mb-3 flex items-center gap-1.5">
+                    <div className="mt-4 pt-4 border-t border-red-100 dark:border-red-900/30 bg-red-50/50 dark:bg-red-900/10 -mx-4 -mb-4 p-4 rounded-b-lg animate-in slide-in-from-top-2 transition-colors">
+                      <p className="text-xs text-red-800 dark:text-red-400 font-medium mb-3 flex items-center gap-1.5">
                         <span>⚠️</span>
                         To deactivate "{kind.label}", you must select a new classification for its {count} existing {count === 1 ? 'node' : 'nodes'}.
                       </p>
@@ -314,7 +314,7 @@ export default function DictionaryClient({
                         <select
                           value={targetId}
                           onChange={(e) => setTargetId(e.target.value)}
-                          className="flex-1 p-2 text-sm border border-red-200 rounded focus:ring-2 focus:ring-red-500 outline-none"
+                          className="flex-1 p-2 text-sm border border-red-200 dark:border-red-800/50 bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 rounded focus:ring-2 focus:ring-red-500 outline-none transition-colors"
                         >
                           <option value="">Select fallback kind...</option>
                           {activeKinds.filter(k => k.id !== kind.id).map(k => (
@@ -324,7 +324,7 @@ export default function DictionaryClient({
                         <button
                           onClick={() => handleMigrate(kind.id)}
                           disabled={isPending || !targetId}
-                          className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded hover:bg-red-700 disabled:opacity-50 cursor-pointer shadow-sm"
+                          className="px-4 py-2 bg-red-600 dark:bg-red-500 text-white text-sm font-medium rounded hover:bg-red-700 dark:hover:bg-red-600 disabled:opacity-50 cursor-pointer shadow-sm transition-colors"
                         >
                           {isPending ? "Migrating..." : "Migrate & Deactivate"}
                         </button>
@@ -339,15 +339,15 @@ export default function DictionaryClient({
 
         {/* INACTIVE / DEPRECATED SECTION */}
         {inactiveKinds.length > 0 && (
-          <div className="pt-8 mt-8 border-t border-gray-200">
-             <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">
+          <div className="pt-8 mt-8 border-t border-gray-200 dark:border-zinc-800 transition-colors">
+             <h2 className="text-sm font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest mb-4">
               Deprecated Classifications
             </h2>
             <div className="grid grid-cols-2 gap-3 opacity-60">
               {inactiveKinds.map(kind => (
-                <div key={kind.id} className="bg-gray-50 border border-gray-200 rounded p-3 flex items-center gap-2 grayscale">
+                <div key={kind.id} className="bg-gray-50 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-800 rounded p-3 flex items-center gap-2 grayscale transition-colors">
                   <span>{kind.icon}</span>
-                  <span className="text-sm text-gray-500 line-through">{kind.label}</span>
+                  <span className="text-sm text-gray-500 dark:text-zinc-400 line-through">{kind.label}</span>
                 </div>
               ))}
             </div>

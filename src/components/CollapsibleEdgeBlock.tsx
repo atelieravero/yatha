@@ -11,9 +11,11 @@ interface CollapsibleEdgeBlockProps {
   builderConfig?: any; // The config object for the UniversalBuilder
   defaultOpen?: boolean;
   
-  // Context required by EdgeRow
+  // Context required by EdgeRow & UniversalBuilder
   currentTab: string;
   activeNodeId: string;
+  sourceNode?: any;
+  allNodes?: any[];
   activeKinds: any[];
   allPredicates?: any[]; // Optional: Dictionary of predicates for lookup
   fixedPredDef?: any; // Optional: Hardcoded predicate (e.g., for system CARRIES)
@@ -29,6 +31,8 @@ export default function CollapsibleEdgeBlock({
   defaultOpen = true,
   currentTab,
   activeNodeId,
+  sourceNode,
+  allNodes = [],
   activeKinds,
   allPredicates = [],
   fixedPredDef,
@@ -81,8 +85,14 @@ export default function CollapsibleEdgeBlock({
           className="flex items-center gap-2" 
           onClick={(e) => e.stopPropagation()} // Prevents clicking the "+" button from collapsing the block
         >
-          {builderConfig && (
-            <UniversalBuilder {...builderConfig} />
+          {builderConfig && sourceNode && (
+            <UniversalBuilder 
+              config={builderConfig}
+              sourceNode={sourceNode}
+              allNodes={allNodes}
+              activeKinds={activeKinds}
+              allPredicates={allPredicates}
+            />
           )}
         </div>
       </div>

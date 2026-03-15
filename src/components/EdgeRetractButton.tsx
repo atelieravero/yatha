@@ -19,7 +19,7 @@ export default function EdgeRetractButton({ edgeId }: { edgeId: string }) {
     <button
       onClick={handleRetract}
       disabled={isPending}
-      className="ml-auto text-xs font-medium text-red-500 opacity-0 group-hover:opacity-100 px-3 py-1.5 hover:bg-red-50 rounded-md transition-opacity disabled:opacity-50 cursor-pointer"
+      className="ml-auto text-xs font-medium text-red-500 dark:text-red-400 opacity-0 group-hover:opacity-100 px-3 py-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors disabled:opacity-50 cursor-pointer"
       title="Retract this relationship"
     >
       {isPending ? "Retracting..." : "Retract"}

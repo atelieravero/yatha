@@ -196,6 +196,8 @@ export default async function Home({
   const edgeContext = {
     currentTab: "", // Tabs removed! Empty string maintains clean URLs
     activeNodeId: activeNode.id,
+    sourceNode: activeNode, // NEW: Required by UniversalBuilder
+    allNodes: allNodes,     // NEW: Required by UniversalBuilder
     activeKinds,
     allPredicates,
   };

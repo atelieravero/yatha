@@ -1,9 +1,17 @@
 @import "tailwindcss";
 
+/* Enable class-based dark mode for the Sidebar toggle */
+@variant dark (&:is(.dark *));
+
 @layer base {
   :root {
     --background: #f9fafb; /* Tailwind gray-50 */
     --foreground: #111827; /* Tailwind gray-900 */
+  }
+  
+  .dark {
+    --background: #09090b; /* Tailwind zinc-950 */
+    --foreground: #f4f4f5; /* Tailwind zinc-50 */
   }
 
   body {
@@ -25,6 +33,7 @@
   background: transparent;
 }
 
+/* Light Mode Scrollbar */
 ::-webkit-scrollbar-thumb {
   background-color: #e5e7eb; /* Tailwind gray-200 */
   border-radius: 10px;
@@ -32,4 +41,13 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background-color: #d1d5db; /* Tailwind gray-300 */
+}
+
+/* Dark Mode Scrollbar */
+.dark ::-webkit-scrollbar-thumb {
+  background-color: #3f3f46; /* Tailwind zinc-700 */
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: #52525b; /* Tailwind zinc-600 */
 }

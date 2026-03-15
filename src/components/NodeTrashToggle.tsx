@@ -32,7 +32,7 @@ export default function NodeTrashToggle({
       <button
         onClick={handleRestore}
         disabled={isPending}
-        className="w-full sm:w-auto px-6 py-3 bg-blue-600 text-white rounded-lg font-bold uppercase tracking-widest shadow-sm hover:bg-blue-700 transition-colors disabled:opacity-50 cursor-pointer"
+        className="w-full sm:w-auto px-6 py-3 bg-blue-600 dark:bg-blue-500 text-white rounded-lg font-bold uppercase tracking-widest shadow-sm hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors disabled:opacity-50 cursor-pointer"
       >
         {isPending ? "Restoring..." : "Restore Record"}
       </button>
@@ -44,7 +44,7 @@ export default function NodeTrashToggle({
     <button
       onClick={handleTrash}
       disabled={isPending}
-      className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-red-500 bg-white border border-red-100 rounded-md hover:bg-red-50 hover:text-red-700 transition-colors cursor-pointer shadow-sm disabled:opacity-50"
+      className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-red-500 dark:text-red-400 bg-white dark:bg-zinc-900 border border-red-100 dark:border-red-900/30 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-700 dark:hover:text-red-300 transition-colors cursor-pointer shadow-sm disabled:opacity-50"
       title="Move to Trash"
     >
       <span>🗑️</span> {isPending ? "..." : "Trash"}

@@ -5,10 +5,12 @@ import { updateNodeAliases } from "@/app/actions";
 
 export default function AliasEditor({ 
   nodeId, 
-  initialAliases = [] 
+  initialAliases = [],
+  canWrite = true
 }: { 
   nodeId: string; 
   initialAliases: string[]; 
+  canWrite?: boolean;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -56,12 +58,12 @@ export default function AliasEditor({
           onKeyDown={handleKeyDown}
           disabled={isPending}
           placeholder='e.g. Mark Twain, "Potter, Harry"'
-          className="flex-1 px-2 py-1 text-sm border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono shadow-sm"
+          className="flex-1 px-2 py-1 text-sm border border-blue-300 dark:border-blue-500/50 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono shadow-sm bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-500 transition-colors"
         />
         <button 
           onClick={handleSave} 
           disabled={isPending}
-          className="px-3 py-1 text-xs bg-blue-600 text-white rounded font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer"
+          className="px-3 py-1 text-xs bg-blue-600 text-white rounded font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer shadow-sm"
         >
           {isPending ? "..." : "Save"}
         </button>
@@ -71,25 +73,29 @@ export default function AliasEditor({
 
   return (
     <div 
-      className="group flex items-center gap-2 mt-1 cursor-pointer min-h-[24px]"
+      className={`group flex items-center gap-2 mt-1 min-h-[24px] ${canWrite ? 'cursor-pointer' : ''}`}
       onClick={() => {
+        if (!canWrite) return;
         setInputValue(formatAliasesForInput(initialAliases));
         setIsEditing(true);
       }}
-      title="Click to edit aliases"
+      title={canWrite ? "Click to edit aliases" : undefined}
     >
       {initialAliases.length > 0 ? (
-        <div className="text-sm text-gray-500 font-mono group-hover:text-blue-600 transition-colors">
+        <div className={`text-sm text-gray-500 dark:text-zinc-400 font-mono transition-colors ${canWrite ? 'group-hover:text-blue-600 dark:group-hover:text-blue-400' : ''}`}>
           {initialAliases.join(' • ')}
         </div>
-      ) : (
-        <div className="text-xs text-gray-400 italic opacity-0 group-hover:opacity-100 transition-opacity">
+      ) : canWrite ? (
+        <div className="text-xs text-gray-400 dark:text-zinc-500 italic opacity-0 group-hover:opacity-100 transition-opacity">
           + Add aliases (multilingual names, acronyms, etc.)
         </div>
+      ) : null}
+      
+      {canWrite && (
+        <span className="text-blue-500 dark:text-blue-400 text-xs opacity-0 group-hover:opacity-100 transition-opacity">
+          ✎
+        </span>
       )}
-      <span className="text-blue-500 text-xs opacity-0 group-hover:opacity-100 transition-opacity">
-        ✎
-      </span>
     </div>
   );
 }
