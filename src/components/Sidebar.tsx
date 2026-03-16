@@ -75,9 +75,8 @@ export default function Sidebar({
 
   // --- Minting / Upload State ---
   const [isMinting, setIsMinting] = useState(false);
-  const [mintTrack, setMintTrack] = useState<'FORM' | 'PAYLOAD' | null>(null);
+  const [activeGateway, setActiveGateway] = useState<'IDENTITY' | 'PHYSICAL' | 'FILE' | 'URL' | null>(null);
   const [mintLabel, setMintLabel] = useState("");
-  const [mintLayer, setMintLayer] = useState<"IDENTITY" | "PHYSICAL" | "">("");
   const [mintKind, setMintKind] = useState("");
   
   const [file, setFile] = useState<File | null>(null);
@@ -103,9 +102,8 @@ export default function Sidebar({
 
   const resetMinting = () => {
     setIsMinting(false);
-    setMintTrack(null);
+    setActiveGateway(null);
     setMintLabel("");
-    setMintLayer("");
     setMintKind("");
     setFile(null);
     setPayloadHash("");
@@ -119,13 +117,13 @@ export default function Sidebar({
 
   // --- Track 1: Form (Identity/Physical) ---
   const handleMintForm = async () => {
-    if (!mintLabel.trim() || !mintLayer) return;
-    if (mintLayer === 'IDENTITY' && !mintKind) return;
+    if (!mintLabel.trim() || !activeGateway) return;
+    if (activeGateway === 'IDENTITY' && !mintKind) return;
 
     setUploadStatus("Checking records...");
     
     // Soft Dedupe Check
-    const exactMatch = await getExactMatchNode(mintLabel.trim(), mintLayer as any);
+    const exactMatch = await getExactMatchNode(mintLabel.trim(), activeGateway as any);
     if (exactMatch) {
       setDuplicateFound(exactMatch as Node);
       setUploadStatus("");
@@ -133,7 +131,7 @@ export default function Sidebar({
     }
 
     startTransitionSubmit(async () => {
-      const newId = await createNode(mintLabel.trim(), mintLayer as "IDENTITY" | "PHYSICAL", mintLayer === 'IDENTITY' ? mintKind : null);
+      const newId = await createNode(mintLabel.trim(), activeGateway as "IDENTITY" | "PHYSICAL", activeGateway === 'IDENTITY' ? mintKind : null);
       router.push(`/?node=${newId}`);
       resetMinting();
       setIsMobileMenuOpen(false);
@@ -175,25 +173,47 @@ export default function Sidebar({
     }
   };
 
-  const handleMintPayload = async () => {
-    if (!file || !payloadHash || !mintLabel.trim()) return;
+  const analyzeUrl = async () => {
+    if (!mintLabel.trim()) return;
+    setUploadStatus("Analyzing URL...");
+    let hash = mintLabel.trim();
+    const ytMatch = hash.match(/(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
+    if (ytMatch && ytMatch[1]) hash = `youtube:${ytMatch[1]}`;
+    
+    setPayloadHash(hash);
+    const existing = await checkDuplicateArtifact(hash);
+    if (existing) {
+      setDuplicateFound(existing as Node);
+      setUploadStatus("");
+      return;
+    }
+    handleMintPayload(hash);
+  };
+
+  const handleMintPayload = async (overrideHash?: string) => {
+    const finalHash = overrideHash || payloadHash;
+    if (!finalHash || !mintLabel.trim()) return;
 
     startTransitionSubmit(async () => {
       try {
         setUploadStatus("Minting record...");
         const newId = await createNode(mintLabel.trim(), "MEDIA", null);
 
-        setUploadStatus("Requesting secure upload ticket...");
-        const { uploadUrl, fileUrl } = await getUploadTicket(file.name, file.type);
-        
-        if (uploadUrl && uploadUrl !== 'mock-url') {
-           setUploadStatus("Uploading securely to R2...");
-           const uploadResponse = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
-           if (!uploadResponse.ok) throw new Error("Storage rejected the file.");
+        let finalFileUrl = finalHash;
+
+        if (activeGateway === 'FILE' && file) {
+          setUploadStatus("Requesting secure upload ticket...");
+          const { uploadUrl, fileUrl } = await getUploadTicket(file.name, file.type);
+          finalFileUrl = fileUrl;
+          if (uploadUrl && uploadUrl !== 'mock-url') {
+             setUploadStatus("Uploading securely to R2...");
+             const uploadResponse = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
+             if (!uploadResponse.ok) throw new Error("Storage rejected the file.");
+          }
         }
 
         setUploadStatus("Finalizing graph properties...");
-        await attachFileToNode(newId, fileUrl || payloadHash, file.type, file.size, payloadHash);
+        await attachFileToNode(newId, finalFileUrl, activeGateway === 'FILE' ? file!.type : 'text/html', activeGateway === 'FILE' ? file!.size : 0, finalHash);
         
         router.push(`/?node=${newId}`);
         resetMinting();
@@ -280,19 +300,22 @@ export default function Sidebar({
         </div>
 
         {canWrite && !isMinting && (
-          <div className="px-4 pb-4 flex gap-2">
-            <button 
-              onClick={() => { setIsMinting(true); setMintTrack('FORM'); }}
-              className="flex-1 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50 rounded hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors shadow-sm cursor-pointer"
-            >
-              + Mint Record
-            </button>
-            <button 
-              onClick={() => { setIsMinting(true); setMintTrack('PAYLOAD'); }}
-              className="flex-1 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 rounded hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors shadow-sm cursor-pointer"
-            >
-              ☁️ Upload File
-            </button>
+          <div className="px-4 pb-4">
+            <label className="block text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Mint Record</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => { setIsMinting(true); setActiveGateway('IDENTITY'); }} className="py-2 text-[10px] font-bold uppercase tracking-widest bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50 rounded hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors shadow-sm cursor-pointer flex flex-col items-center gap-1">
+                <span className="text-sm">🟣</span> Concept
+              </button>
+              <button onClick={() => { setIsMinting(true); setActiveGateway('PHYSICAL'); }} className="py-2 text-[10px] font-bold uppercase tracking-widest bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 rounded hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors shadow-sm cursor-pointer flex flex-col items-center gap-1">
+                <span className="text-sm">📦</span> Physical
+              </button>
+              <button onClick={() => { setIsMinting(true); setActiveGateway('FILE'); }} className="py-2 text-[10px] font-bold uppercase tracking-widest bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors shadow-sm cursor-pointer flex flex-col items-center gap-1">
+                <span className="text-sm">📄</span> File
+              </button>
+              <button onClick={() => { setIsMinting(true); setActiveGateway('URL'); }} className="py-2 text-[10px] font-bold uppercase tracking-widest bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors shadow-sm cursor-pointer flex flex-col items-center gap-1">
+                <span className="text-sm">🔗</span> URL
+              </button>
+            </div>
           </div>
         )}
 
@@ -300,7 +323,7 @@ export default function Sidebar({
           <div className="mx-4 mb-4 p-4 border border-blue-200 dark:border-blue-800/50 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg shadow-inner animate-in fade-in slide-in-from-top-2">
             <div className="flex justify-between items-center mb-3">
               <span className="text-[10px] font-bold uppercase tracking-widest text-blue-800 dark:text-blue-400">
-                {mintTrack === 'FORM' ? '✨ Mint New Record' : '☁️ Upload Media'}
+                {activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL' ? '✨ Mint Record' : '☁️ Upload Media'}
               </span>
               <button onClick={resetMinting} disabled={isPending} className="text-gray-400 hover:text-gray-800 dark:hover:text-zinc-300 cursor-pointer px-1">✕</button>
             </div>
@@ -310,7 +333,7 @@ export default function Sidebar({
                 {duplicateFound.isActive === false ? (
                   <>
                     <p className="text-xs font-bold text-gray-800 dark:text-zinc-200 mb-1 flex items-center gap-1"><span>🗑️</span> Found in Trash</p>
-                    <p className="text-[10px] text-gray-600 dark:text-zinc-400 mb-3 leading-tight">This {mintTrack === 'PAYLOAD' ? 'exact payload' : 'name'} exists, but was moved to the trash.</p>
+                    <p className="text-[10px] text-gray-600 dark:text-zinc-400 mb-3 leading-tight">This {activeGateway === 'FILE' || activeGateway === 'URL' ? 'exact payload' : 'name'} exists, but was moved to the trash.</p>
                     <button onClick={handleRestoreFromTrash} disabled={isPending} className="w-full py-1.5 bg-gray-800 dark:bg-zinc-700 text-white text-xs font-bold rounded hover:bg-gray-900 dark:hover:bg-zinc-600 cursor-pointer shadow-sm transition-colors">
                       {isPending ? "..." : "Restore & Use"}
                     </button>
@@ -318,17 +341,17 @@ export default function Sidebar({
                 ) : (
                   <>
                     <p className="text-xs font-bold text-amber-800 dark:text-amber-400 mb-1 flex items-center gap-1"><span>⚠️</span> Conflict</p>
-                    <p className="text-[10px] text-amber-700 dark:text-amber-500 mb-3 leading-tight">This {mintTrack === 'PAYLOAD' ? 'exact payload' : 'name'} already exists in the archive.</p>
+                    <p className="text-[10px] text-amber-700 dark:text-amber-500 mb-3 leading-tight">This {activeGateway === 'FILE' || activeGateway === 'URL' ? 'exact payload' : 'name'} already exists in the archive.</p>
                     <div className="flex gap-2">
                       <Link scroll={false} href={`/?node=${duplicateFound.id}`} onClick={resetMinting} className="flex-1 py-1.5 text-center bg-amber-600 text-white text-xs font-bold rounded shadow-sm hover:bg-amber-700 cursor-pointer">View</Link>
-                      {mintTrack === 'FORM' && (
+                      {(activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
                         <button onClick={handleMintForm} className="flex-1 py-1.5 bg-white dark:bg-zinc-800 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-700/50 text-xs font-bold rounded shadow-sm hover:bg-amber-50 dark:hover:bg-amber-900/30 cursor-pointer">Mint Dup</button>
                       )}
                     </div>
                   </>
                 )}
               </div>
-            ) : mintTrack === 'FORM' ? (
+            ) : activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL' ? (
               <div className="space-y-3">
                 <input 
                   type="text" 
@@ -336,15 +359,7 @@ export default function Sidebar({
                   value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isPending}
                   className="w-full p-2 text-xs border border-gray-200 dark:border-zinc-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100"
                 />
-                <select 
-                  value={mintLayer} onChange={e => { setMintLayer(e.target.value as any); setMintKind(""); }} disabled={isPending}
-                  className="w-full p-2 text-xs border border-gray-200 dark:border-zinc-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100"
-                >
-                  <option value="">Select Layer...</option>
-                  <option value="IDENTITY">Abstract Concept</option>
-                  <option value="PHYSICAL">Physical Item</option>
-                </select>
-                {mintLayer === 'IDENTITY' && (
+                {activeGateway === 'IDENTITY' && (
                   <select 
                     value={mintKind} onChange={e => setMintKind(e.target.value)} disabled={isPending}
                     className="w-full p-2 text-xs border border-gray-200 dark:border-zinc-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100"
@@ -353,16 +368,15 @@ export default function Sidebar({
                     {activeKinds.map(k => <option key={k.id} value={k.id}>{k.icon} {k.label}</option>)}
                   </select>
                 )}
-                
                 <button 
-                  onClick={handleMintForm} disabled={isPending || !mintLabel.trim() || !mintLayer || (mintLayer === 'IDENTITY' && !mintKind)}
+                  onClick={handleMintForm} disabled={isPending || !mintLabel.trim() || (activeGateway === 'IDENTITY' && !mintKind)}
                   className="w-full py-2 bg-blue-600 text-white text-xs font-bold uppercase tracking-widest rounded shadow-sm hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer"
                 >
                   {isPending ? "Minting..." : "Create"}
                 </button>
                 {uploadStatus && <p className="text-[10px] text-blue-600 dark:text-blue-400 font-bold animate-pulse text-center">{uploadStatus}</p>}
               </div>
-            ) : (
+            ) : activeGateway === 'FILE' ? (
               <div className="space-y-3">
                 <input type="file" className="hidden" id="sb-file" onChange={handleFileSelect} disabled={isPending} />
                 <label htmlFor="sb-file" className="block p-4 rounded-lg border-2 border-dashed border-blue-200 dark:border-blue-800/50 text-center transition-colors cursor-pointer bg-white dark:bg-zinc-900 hover:bg-blue-50 dark:hover:bg-blue-900/20">
@@ -379,12 +393,28 @@ export default function Sidebar({
                 )}
                 {file && !duplicateFound && (
                   <button 
-                    onClick={handleMintPayload} disabled={isPending || !payloadHash || !mintLabel.trim()}
+                    onClick={() => handleMintPayload()} disabled={isPending || !payloadHash || !mintLabel.trim()}
                     className="w-full py-2 bg-blue-600 text-white text-xs font-bold uppercase tracking-widest rounded shadow-sm hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer"
                   >
                     {isPending ? "Processing..." : "Upload"}
                   </button>
                 )}
+                {uploadStatus && <p className="text-[10px] text-blue-600 dark:text-blue-400 font-bold animate-pulse text-center">{uploadStatus}</p>}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <input 
+                  type="url" 
+                  placeholder="https://" 
+                  value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isPending}
+                  className="w-full p-2 text-xs border border-gray-200 dark:border-zinc-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100"
+                />
+                <button 
+                  onClick={analyzeUrl} disabled={isPending || !mintLabel.trim()}
+                  className="w-full py-2 bg-blue-600 text-white text-xs font-bold uppercase tracking-widest rounded shadow-sm hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  {isPending ? "Processing..." : "Link URL"}
+                </button>
                 {uploadStatus && <p className="text-[10px] text-blue-600 dark:text-blue-400 font-bold animate-pulse text-center">{uploadStatus}</p>}
               </div>
             )}
