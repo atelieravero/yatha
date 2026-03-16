@@ -29,12 +29,22 @@ export default function PropertiesEditor({
 
   const [liveBounds, setLiveBounds] = useState<{start?: Date, end?: Date}>({});
 
+  // 1. Calculate live temporal bounds as the user types
   useEffect(() => {
     if (isEditing && formData['temporal_input'] !== undefined) {
       const parsed = parseFuzzyTemporal(formData['temporal_input']);
       setLiveBounds({ start: parsed.notEarlierThan, end: parsed.notLaterThan });
     }
   }, [formData, isEditing]);
+
+  // 2. STATE SANITATION ON NAVIGATION
+  // Because React reuses this component when switching pages, we must 
+  // explicitly wipe the state and close the editor whenever the nodeId changes!
+  useEffect(() => {
+    setIsEditing(false);
+    setFormData(initialProps || {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeId]);
 
   // --------------------------------------------------------------------------
   // 3-LAYER DYNAMIC SCHEMA ROUTING
@@ -90,10 +100,15 @@ export default function PropertiesEditor({
         {canWrite && (
           <button 
             onClick={() => {
+               // Guarantee fresh database props are loaded into the form before opening
+               setFormData(initialProps || {}); 
                setIsEditing(true);
+               
                if (initialProps.temporal_input) {
                  const parsed = parseFuzzyTemporal(initialProps.temporal_input);
                  setLiveBounds({ start: parsed.notEarlierThan, end: parsed.notLaterThan });
+               } else {
+                 setLiveBounds({}); // Clear out dirty bounds from previous nodes
                }
             }}
             className="absolute top-3 right-3 text-[10px] font-bold uppercase tracking-widest text-blue-600 dark:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 rounded cursor-pointer border border-blue-100 dark:border-blue-800/50 hover:bg-blue-100 dark:hover:bg-blue-900/40 z-10"
