@@ -39,8 +39,9 @@ export default function CollapsibleEdgeBlock({
   hideBadge = false,
   hideEdit = false,
 }: CollapsibleEdgeBlockProps) {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
   const count = items.length;
+  // Auto-collapse if empty, regardless of defaultOpen prop
+  const [isOpen, setIsOpen] = useState(defaultOpen && count > 0);
 
   // Don't render the block at all if it has no data AND no builder configuration
   if (count === 0 && !builderConfig) return null;

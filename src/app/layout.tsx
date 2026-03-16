@@ -37,7 +37,18 @@ export default async function RootLayout({
   }
 
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `
+          try {
+            if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+              document.documentElement.classList.add('dark')
+            } else {
+              document.documentElement.classList.remove('dark')
+            }
+          } catch (_) {}
+        `}} />
+      </head>
       <body className="antialiased bg-gray-50 dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 font-sans flex h-screen overflow-hidden transition-colors duration-300">
         {/* Conditionally render the Sidebar ONLY if the user is authenticated */}
         {session && (

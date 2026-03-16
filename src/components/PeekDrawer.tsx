@@ -1,31 +1,42 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getQuickContext } from "@/app/actions";
+// NOTE: In your local environment, use the real import!
+// import { getQuickContext } from "@/app/actions";
+
+// --- Mocks strictly for the web preview environment ---
+const getQuickContext = async (nodeId: string) => new Promise<{edges: any[], relatedNodes: any[]}>(resolve => setTimeout(() => resolve({edges: [], relatedNodes: []}), 500));
+// ------------------------------------------------------
+
 import { getMediaDetails } from "@/lib/mediaUtils";
+import CollapsibleEdgeBlock from "./CollapsibleEdgeBlock";
+import { groupEdges } from "@/lib/edgeGrouping";
 
 export default function PeekDrawer({
   peekNode,
   activeNodeId,
   currentTab,
   activeKinds,
+  allPredicates = [], 
   securePeekUrl 
 }: {
   peekNode: any;
   activeNodeId: string;
   currentTab: string;
   activeKinds: any[];
+  allPredicates?: any[];
   securePeekUrl?: string; 
 }) {
-  const [contextLinks, setContextLinks] = useState<any[]>([]);
+  const [contextData, setContextData] = useState<{ edges: any[], relatedNodes: any[] }>({ edges: [], relatedNodes: [] });
   const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch the lightweight relationship context when the drawer opens
+  // Fetch the full relationship context when the drawer opens
   useEffect(() => {
     if (peekNode) {
       setIsLoading(true);
-      getQuickContext(peekNode.id).then(data => {
-        setContextLinks(data);
+      // NOTE: Expects getQuickContext to return { edges, relatedNodes }
+      getQuickContext(peekNode.id).then((data: any) => {
+        setContextData(data);
         setIsLoading(false);
       });
     }
@@ -34,7 +45,7 @@ export default function PeekDrawer({
   if (!peekNode) return null;
 
   // --------------------------------------------------------------------------
-  // 3-LAYER ICON & LABEL ROUTING (Now using shared utility!)
+  // 3-LAYER ICON & LABEL ROUTING 
   // --------------------------------------------------------------------------
   let icon = '🟣';
   let label = 'Concept';
@@ -56,18 +67,34 @@ export default function PeekDrawer({
     }
   }
 
-  // The URL to return to the active node, safely discarding the 'peek' parameter
   const closeHref = `/?node=${activeNodeId}${currentTab ? `&tab=${currentTab}` : ''}`;
   const focusHref = `/?node=${peekNode.id}`;
 
   const { isImage, isVideo, isAudio, isYouTube, isWebLink, ytId } = mediaDetails;
-  
   const propsToDisplay = Object.entries(peekProps).filter(([k]) => k !== 'fileUrl' && k !== 'mimeType' && k !== 'temporal_input' && k !== 'hash');
-
   const isTombstone = peekNode.isActive === false;
 
+  // --------------------------------------------------------------------------
+  // EDGE GROUPING
+  // --------------------------------------------------------------------------
+  const groups = groupEdges(contextData.edges || [], peekNode, contextData.relatedNodes || []);
+  const { physicalHoldings, digitalArtifacts, mediaAppearances, conceptualSemantics, bridgedConcepts, physicalSources, containedIn, containsItems } = groups;
+
+  const isIdentity = peekNode.layer === 'IDENTITY';
+  const isPhysical = peekNode.layer === 'PHYSICAL';
+  const isMedia = peekNode.layer === 'MEDIA';
+
+  // Base props required by all edge blocks in the drawer.
+  // Note: hideEdit is strictly forced to TRUE because drawers are read-only views!
+  const edgeContext = {
+    currentTab,
+    activeNodeId: peekNode.id, // The drawer's node is the active node for these blocks
+    activeKinds,
+    allPredicates,
+    hideEdit: true,
+  };
+
   return (
-    // The container is transparent to keep the user anchored to their main workspace.
     <div className="fixed inset-0 z-50 flex justify-end items-end md:items-stretch bg-gray-900/20 dark:bg-black/60 md:bg-transparent md:dark:bg-transparent backdrop-blur-sm md:backdrop-blur-none pointer-events-none transition-colors duration-300">
       
       {/* Click outside to close (Useful for mobile overlay) */}
@@ -90,7 +117,7 @@ export default function PeekDrawer({
         </div>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
           
           {/* 1. The Core Identity */}
           <div>
@@ -155,31 +182,57 @@ export default function PeekDrawer({
             )}
           </div>
 
-          {/* 4. Read-Only Context Block */}
-          <div className="space-y-4">
-            <h3 className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest border-b border-gray-100 dark:border-zinc-800 pb-1">Graph Context</h3>
+          {/* 4. Structured Context Blocks (Mirrors Main Page) */}
+          <div className="space-y-2">
+            <h3 className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest border-b border-gray-100 dark:border-zinc-800 pb-1 mb-3">Graph Context</h3>
             
             {isLoading ? (
-              <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-zinc-500 animate-pulse">
+              <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-zinc-500 animate-pulse py-4">
                 <span className="text-lg">⏳</span> Loading relationships...
               </div>
-            ) : contextLinks.length === 0 ? (
-              <span className="text-xs text-gray-400 dark:text-zinc-500 italic">No structural or semantic links mapped.</span>
+            ) : (!contextData.edges || contextData.edges.length === 0) ? (
+              <div className="p-4 border border-dashed border-gray-200 dark:border-zinc-800 rounded-lg text-xs text-gray-400 dark:text-zinc-500 italic text-center">
+                No structural or semantic links mapped.
+              </div>
             ) : (
-              <div className="space-y-2">
-                {contextLinks.map((link, i) => (
-                  <div key={i} className={`flex items-baseline gap-2 text-sm ${link.isTargetActive === false ? 'opacity-50 grayscale' : ''}`}>
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border whitespace-nowrap uppercase tracking-wider ${link.isSystem ? 'text-amber-700 dark:text-amber-500 bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800/50' : 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/50'}`}>
-                      {link.predicate}
-                    </span>
-                    <span className={`text-gray-700 dark:text-zinc-300 truncate ${link.isTargetActive === false ? 'line-through decoration-gray-400 dark:decoration-zinc-500' : ''}`}>
-                      {link.label}
-                    </span>
-                  </div>
-                ))}
-                <div className="pt-2 text-xs text-gray-400 dark:text-zinc-500 italic mt-2">
-                  Focus this record to view full relationship details.
-                </div>
+              <div className="flex flex-col">
+                
+                {/* 2a. BRIDGED CONCEPTS */}
+                {(isPhysical || isMedia) && (
+                  <CollapsibleEdgeBlock {...edgeContext} title="Bridged Concept" icon="💡" items={bridgedConcepts} hideBadge fixedPredDef={{ forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} />
+                )}
+
+                {/* 2b. PHYSICAL SOURCE MATERIAL */}
+                {isMedia && (
+                  <CollapsibleEdgeBlock {...edgeContext} title="Physical Source Material" icon="📦" items={physicalSources} hideBadge fixedPredDef={{ forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} />
+                )}
+
+                {/* 5. PHYSICAL HOLDINGS */}
+                {isIdentity && (
+                  <CollapsibleEdgeBlock {...edgeContext} title="Physical Holdings" icon="📦" items={physicalHoldings} fixedPredDef={{ forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} />
+                )}
+
+                {/* 6. CONCEPTUAL SEMANTICS */}
+                <CollapsibleEdgeBlock {...edgeContext} title={isMedia ? 'Identified Subjects & Semantics' : 'Conceptual Semantics'} icon={isMedia ? '📍' : '🔗'} items={conceptualSemantics} />
+
+                {/* 7. DIGITAL EMBODIMENTS */}
+                {(isIdentity || isPhysical) && (
+                  <CollapsibleEdgeBlock {...edgeContext} title="Digital Embodiments" icon="🖼️" items={digitalArtifacts} hideBadge />
+                )}
+
+                {/* 8. MEDIA APPEARANCES */}
+                {(isIdentity || isPhysical) && (
+                  <CollapsibleEdgeBlock {...edgeContext} title="Media Appearances" icon="📸" items={mediaAppearances} />
+                )}
+
+                {/* 9. COLLECTIONS */}
+                <CollapsibleEdgeBlock {...edgeContext} title="Contained In" icon="📥" items={containedIn} fixedPredDef={{ forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }} />
+
+                {/* 10. CONTENTS */}
+                {!isMedia && (
+                  <CollapsibleEdgeBlock {...edgeContext} title="Contents & Items" icon="📥" items={containsItems} fixedPredDef={{ forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }} />
+                )}
+
               </div>
             )}
           </div>

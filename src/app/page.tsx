@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { nodes, edges, SYSTEM_PREDICATES } from "@/db/schema";
 import { getSecureMediaUrl, getRecentNodes, getAllKinds, seedSystemPredicates, getAllPredicates } from "@/app/actions";
 import { getMediaDetails } from "@/lib/mediaUtils";
+import { groupEdges } from "@/lib/edgeGrouping";
 
 import PropertiesEditor from "@/components/PropertiesEditor";
 import NodeClassification from "@/components/NodeClassification";
@@ -29,7 +30,7 @@ export default async function Home({
 
   if (!nodeId) {
     return (
-      <div className="flex h-full items-center justify-center bg-gray-50 text-gray-400 p-8">
+      <div className="flex h-full items-center justify-center bg-gray-50 dark:bg-zinc-950 text-gray-400 dark:text-zinc-500 p-8 transition-colors">
         <div className="text-center">
           <span className="text-4xl block mb-4">✨</span>
           <p>Select an item from the sidebar to open the workspace.</p>
@@ -39,7 +40,7 @@ export default async function Home({
   }
 
   const [rawActiveNode] = await db.select().from(nodes).where(eq(nodes.id, nodeId));
-  if (!rawActiveNode) return <div className="p-8 text-red-500">Node not found.</div>;
+  if (!rawActiveNode) return <div className="p-8 text-red-500 dark:text-red-400">Node not found.</div>;
 
   const activeNode = {
     ...rawActiveNode,
@@ -53,11 +54,11 @@ export default async function Home({
   if (!activeNode.isActive) {
     return (
       <div className="max-w-4xl mx-auto p-8 md:p-12 pb-32 flex flex-col items-center justify-center h-full min-h-[70vh]">
-        <div className="text-center bg-white p-10 md:p-16 rounded-2xl border border-gray-200 shadow-sm w-full max-w-lg animate-in fade-in zoom-in-95">
+        <div className="text-center bg-white dark:bg-zinc-900 p-10 md:p-16 rounded-2xl border border-gray-200 dark:border-zinc-800 shadow-sm w-full max-w-lg animate-in fade-in zoom-in-95 transition-colors">
           <span className="text-6xl block mb-6 grayscale opacity-40">🗑️</span>
-          <h1 className="text-2xl font-serif font-medium text-gray-500 mb-2 line-through decoration-gray-300">{activeNode.label}</h1>
-          <p className="text-[10px] font-mono text-gray-400 mb-8 uppercase tracking-widest">{activeNode.id}</p>
-          <div className="bg-gray-50 text-gray-500 text-sm p-4 rounded-lg mb-8 leading-relaxed border border-gray-100">
+          <h1 className="text-2xl font-serif font-medium text-gray-500 dark:text-zinc-400 mb-2 line-through decoration-gray-300 dark:decoration-zinc-700">{activeNode.label}</h1>
+          <p className="text-[10px] font-mono text-gray-400 dark:text-zinc-500 mb-8 uppercase tracking-widest">{activeNode.id}</p>
+          <div className="bg-gray-50 dark:bg-zinc-800/50 text-gray-500 dark:text-zinc-400 text-sm p-4 rounded-lg mb-8 leading-relaxed border border-gray-100 dark:border-zinc-800 transition-colors">
             This record is currently in the Trash.<br/>
             Its properties and structural relationships are hidden but fully preserved in the database.
           </div>
@@ -75,12 +76,12 @@ export default async function Home({
       .where(and(eq(edges.isActive, true), or(eq(edges.sourceId, nodeId), eq(edges.targetId, nodeId))));
   } catch (error: any) {
     return (
-      <div className="flex h-full items-center justify-center bg-gray-50 p-8">
-        <div className="text-center max-w-md bg-white p-8 rounded-2xl shadow-sm border border-red-100">
+      <div className="flex h-full items-center justify-center bg-gray-50 dark:bg-zinc-950 p-8 transition-colors">
+        <div className="text-center max-w-md bg-white dark:bg-zinc-900 p-8 rounded-2xl shadow-sm border border-red-100 dark:border-red-900/30 transition-colors">
           <span className="text-5xl block mb-4">⚠️</span>
-          <h2 className="text-lg font-bold text-gray-900 mb-2">Database Sync Required</h2>
-          <p className="text-sm text-gray-600 mb-6">We recently updated the graph engine.</p>
-          <div className="bg-gray-900 text-gray-100 text-xs font-mono p-4 rounded-lg text-left shadow-inner">npx drizzle-kit push</div>
+          <h2 className="text-lg font-bold text-gray-900 dark:text-zinc-100 mb-2">Database Sync Required</h2>
+          <p className="text-sm text-gray-600 dark:text-zinc-400 mb-6">We recently updated the graph engine.</p>
+          <div className="bg-gray-900 dark:bg-zinc-950 text-gray-100 dark:text-zinc-300 text-xs font-mono p-4 rounded-lg text-left shadow-inner border border-gray-800 dark:border-zinc-800">npx drizzle-kit push</div>
         </div>
       </div>
     );
@@ -152,52 +153,16 @@ export default async function Home({
   const isPhysical = activeNode.layer === 'PHYSICAL';
   const isMedia = activeNode.layer === 'MEDIA';
   
-  const physicalHoldings: { edge: any, node: any, isSource: boolean }[] = [];
-  const digitalArtifacts: { edge: any, node: any, isSource: boolean }[] = [];
-  const mediaAppearances: { edge: any, node: any, isSource: boolean }[] = []; 
-  const conceptualSemantics: { edge: any, node: any, isSource: boolean }[] = []; 
-  const bridgedConcepts: { edge: any, node: any, isSource: boolean }[] = []; 
-  const physicalSources: { edge: any, node: any, isSource: boolean }[] = []; 
-  const containedIn: { edge: any, node: any, isSource: boolean }[] = [];
-  const containsItems: { edge: any, node: any, isSource: boolean }[] = [];
-
-  connectedEdges.forEach(edge => {
-    const isSource = edge.sourceId === activeNode.id;
-    const node = allNodes.find(n => n.id === (isSource ? edge.targetId : edge.sourceId));
-    if (!node) return;
-
-    const nodeIsIdentity = node.layer === 'IDENTITY';
-    const nodeIsPhysical = node.layer === 'PHYSICAL';
-    const nodeIsMedia = node.layer === 'MEDIA';
-
-    if (edge.predicateId === SYSTEM_PREDICATES.CARRIES) {
-      if (!isSource) {
-        if (nodeIsPhysical) physicalHoldings.push({ edge, node, isSource });
-        else if (nodeIsMedia) digitalArtifacts.push({ edge, node, isSource });
-      } else {
-        if (nodeIsIdentity) bridgedConcepts.push({ edge, node, isSource });
-        else if (nodeIsPhysical) physicalSources.push({ edge, node, isSource });
-      }
-    } 
-    else if (edge.predicateId === SYSTEM_PREDICATES.CONTAINS) {
-      if (isSource) containsItems.push({ edge, node, isSource });
-      else containedIn.push({ edge, node, isSource });
-    } 
-    else {
-      if (isMedia) conceptualSemantics.push({ edge, node, isSource });
-      else {
-        if (nodeIsMedia) mediaAppearances.push({ edge, node, isSource });
-        else conceptualSemantics.push({ edge, node, isSource });
-      }
-    }
-  });
+  // Use the new shared utility to sort the edges!
+  const groups = groupEdges(connectedEdges, activeNode, allNodes);
+  const { physicalHoldings, digitalArtifacts, mediaAppearances, conceptualSemantics, bridgedConcepts, physicalSources, containedIn, containsItems } = groups;
 
   // Base props required by all edge blocks
   const edgeContext = {
     currentTab: "", // Tabs removed! Empty string maintains clean URLs
     activeNodeId: activeNode.id,
-    sourceNode: activeNode, // NEW: Required by UniversalBuilder
-    allNodes: allNodes,     // NEW: Required by UniversalBuilder
+    sourceNode: activeNode, // Required by UniversalBuilder
+    allNodes: allNodes,     // Required by UniversalBuilder
     activeKinds,
     allPredicates,
   };
@@ -215,7 +180,7 @@ export default async function Home({
               initialKind={activeNode.kind || ''}
               activeKinds={activeKinds} 
             />
-            <span className="text-gray-400 font-mono text-xs">{activeNode.id}</span>
+            <span className="text-gray-400 dark:text-zinc-500 font-mono text-xs">{activeNode.id}</span>
           </div>
           
           <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
@@ -266,9 +231,9 @@ export default async function Home({
 
         {/* 3. MEDIA VIEWER (Media Only) */}
         {isMedia && (
-          <div className="bg-white border border-gray-200 rounded-xl p-2 shadow-sm mb-6">
+          <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-2 shadow-sm mb-6 transition-colors">
             {hasFile ? (
-              <div className="rounded bg-gray-100 overflow-hidden flex items-center justify-center min-h-[300px]">
+              <div className="rounded bg-gray-100 dark:bg-zinc-950 overflow-hidden flex items-center justify-center min-h-[300px] transition-colors">
                 {isYouTube ? (
                   <iframe className="w-full max-w-2xl aspect-video rounded shadow-sm m-4" src={`https://www.youtube.com/embed/${ytId}`} allowFullScreen></iframe>
                 ) : isWebLink ? (
@@ -280,11 +245,11 @@ export default async function Home({
                   isImage ? <img src={secureViewUrl} alt={activeNode.label} className="max-h-[500px] object-contain" />
                   : isVideo ? <video src={secureViewUrl} controls className="max-h-[500px] w-full object-contain bg-black rounded" />
                   : isAudio ? <audio src={secureViewUrl} controls className="w-full max-w-md m-8" />
-                  : <a href={secureViewUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline p-8">View Attached File</a>
-                ) : <div className="p-8 text-gray-400 animate-pulse text-sm font-bold">Loading secure viewer...</div>}
+                  : <a href={secureViewUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline p-8 transition-colors">View Attached File</a>
+                ) : <div className="p-8 text-gray-400 dark:text-zinc-500 animate-pulse text-sm font-bold">Loading secure viewer...</div>}
               </div>
             ) : (
-              <div className="p-8 text-gray-400 italic text-center text-sm border-2 border-dashed border-gray-200 rounded-xl bg-gray-50">
+              <div className="p-8 text-gray-400 dark:text-zinc-500 italic text-center text-sm border-2 border-dashed border-gray-200 dark:border-zinc-800 rounded-xl bg-gray-50 dark:bg-zinc-800/50 transition-colors">
                 No media payload attached to this record.
               </div>
             )}
@@ -388,7 +353,7 @@ export default async function Home({
 
       </div>
 
-      <PeekDrawer peekNode={peekNode} activeNodeId={activeNode.id} currentTab="" activeKinds={activeKinds} securePeekUrl={securePeekUrl} />
+      <PeekDrawer peekNode={peekNode} activeNodeId={activeNode.id} currentTab="" activeKinds={activeKinds} securePeekUrl={securePeekUrl} allPredicates={allPredicates} />
     </>
   );
 }

@@ -41,19 +41,29 @@ export default function Sidebar({
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isDark, setIsDark] = useState(false);
 
-  // Initialize Dark Mode on mount
+  // Initialize Dark Mode on mount & Add Resize Listener
   useEffect(() => {
     if (document.documentElement.classList.contains('dark')) {
       setIsDark(true);
     }
+
+    const handleResize = () => {
+      if (window.innerWidth >= 768) {
+        setIsMobileMenuOpen(false); // Auto-close menu on desktop
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   const toggleDarkMode = () => {
     if (isDark) {
       document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
       setIsDark(false);
     } else {
       document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
       setIsDark(true);
     }
   };
@@ -457,13 +467,22 @@ export default function Sidebar({
             
             <div className="flex items-center">
               {user.role === 'SUPERUSER' && (
-                <Link 
-                  href="/admin" 
-                  className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer px-2"
-                  title="Admin Settings"
-                >
-                  ⚙️
-                </Link>
+                <>
+                  <Link 
+                    href="/dictionary" 
+                    className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer px-2"
+                    title="Taxonomy Dictionary"
+                  >
+                    📖
+                  </Link>
+                  <Link 
+                    href="/admin" 
+                    className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer px-2"
+                    title="Admin Settings"
+                  >
+                    ⚙️
+                  </Link>
+                </>
               )}
               <button 
                 onClick={() => signOut()} 
