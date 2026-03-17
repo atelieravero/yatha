@@ -88,6 +88,7 @@ export default function Sidebar({
   const [payloadHash, setPayloadHash] = useState("");
   const [duplicateFound, setDuplicateFound] = useState<Node | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isDragging, setIsDragging] = useState(false);
 
   const handleCloseMinting = () => {
     setActiveGateway(null);
@@ -97,6 +98,22 @@ export default function Sidebar({
     setLinkUrl("");
     setPayloadHash("");
     setDuplicateFound(null);
+    setIsDragging(false);
+  };
+
+  // --- Drag & Drop Handlers ---
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); };
+  const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); };
+  
+  const handleDropForm = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const droppedFile = e.dataTransfer.files?.[0];
+    if (droppedFile) {
+      setFile(droppedFile);
+      setMintLabel(droppedFile.name);
+    }
   };
 
   const executeGlobalMint = async () => {
@@ -326,11 +343,11 @@ export default function Sidebar({
               )}
 
               {activeGateway === 'FILE' && (
-                <div className="space-y-3">
-                  <input type="file" id="sidebar-file" className="hidden" onChange={e => e.target.files?.[0] && setFile(e.target.files[0])} />
-                  <label htmlFor="sidebar-file" className={`block p-4 border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors ${file ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-gray-50 dark:hover:bg-zinc-800'}`}>
-                     <span className="block text-2xl mb-1">{file ? '✅' : '📄'}</span>
-                     <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 dark:text-zinc-400">{file ? file.name : 'Select File'}</span>
+                <div className="space-y-3" onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDropForm}>
+                  <input type="file" id="sidebar-file" className="hidden" onChange={e => { if (e.target.files?.[0]) { setFile(e.target.files[0]); setMintLabel(e.target.files[0].name); } }} />
+                  <label htmlFor="sidebar-file" className={`block p-4 border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors ${file ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : isDragging ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-gray-50 dark:hover:bg-zinc-800'}`}>
+                     <span className="block text-2xl mb-1">{file ? '✅' : isDragging ? '📥' : '📄'}</span>
+                     <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 dark:text-zinc-400">{file ? file.name : isDragging ? 'Drop it here!' : 'Select File or Drag & Drop'}</span>
                   </label>
                   {file && (
                      <input type="text" autoFocus placeholder="Artifact Title..." value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isPending} className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors" />
