@@ -116,9 +116,9 @@ export default function CollapsibleEdgeBlock({
               className="text-[10px] font-bold uppercase tracking-widest bg-transparent text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:hover:text-zinc-300 cursor-pointer outline-none transition-colors appearance-none text-right"
               title="Sort this block"
             >
-              <option value="RECENT">Sort: Recent</option>
-              <option value="ASC">Sort: Oldest</option>
-              <option value="DESC">Sort: Newest</option>
+              <option value="RECENT">Sort: Recently Added</option>
+              <option value="ASC">Sort: Time (Oldest)</option>
+              <option value="DESC">Sort: Time (Newest)</option>
             </select>
           )}
 
@@ -159,6 +159,9 @@ export default function CollapsibleEdgeBlock({
                 activeKinds={activeKinds}
                 hideBadge={hideBadge}
                 hideEdit={hideEdit}
+                effectiveStart={item.effectiveStart}
+                effectiveEnd={item.effectiveEnd}
+                inferredBounds={item.inferredBounds}
               />
             );
           })}

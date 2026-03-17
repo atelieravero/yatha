@@ -188,7 +188,10 @@ export default function EdgeRow({
             <span className={isTargetDead ? 'line-through decoration-gray-400 dark:decoration-zinc-600' : ''}>{node.label}</span>
             {isTargetDead && <span className="ml-2 text-[10px] font-bold text-red-500 uppercase tracking-widest no-underline">(Deleted)</span>}
             {!isTargetDead && node.aliases && node.aliases.length > 0 && (
-              <span className="text-gray-400 dark:text-zinc-500 font-normal ml-1.5 text-xs">({node.aliases.join(', ')})</span>
+              <span className="text-gray-400 dark:text-zinc-500 font-normal ml-1.5 text-[10px]">({node.aliases.join(', ')})</span>
+            )}
+            {!isTargetDead && node.temporalInput && (
+              <span className="text-gray-400 dark:text-zinc-500 font-mono ml-1.5 text-[10px]">[{node.temporalInput}]</span>
             )}
           </span>
         </Link>

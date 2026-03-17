@@ -173,9 +173,36 @@ export default function PropertiesEditor({
 
           return (
             <div key={key} className={isNotes || key === 'hash' || key === 'url' || isTemporal ? "sm:col-span-2" : ""}>
-              <label className="font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-wider text-[10px] mb-1.5 block">
-                {displayLabel} {isSystemLocked && "(Locked)"}
-              </label>
+              {isTemporal ? (
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-wider text-[10px] block">
+                    {displayLabel}
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer" title="Mark this entity as timeless">
+                    <span className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase">Timeless</span>
+                    <div className="relative inline-flex items-center">
+                      <input 
+                        type="checkbox" 
+                        checked={formData[key] === 'TIMELESS'}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFormData({ ...formData, [key]: 'TIMELESS' });
+                            setLiveBounds({});
+                          } else {
+                            setFormData({ ...formData, [key]: '' });
+                          }
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-7 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-zinc-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                    </div>
+                  </label>
+                </div>
+              ) : (
+                <label className="font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-wider text-[10px] mb-1.5 block">
+                  {displayLabel} {isSystemLocked && "(Locked)"}
+                </label>
+              )}
               
               {isNotes ? (
                 <textarea
@@ -190,11 +217,11 @@ export default function PropertiesEditor({
                   <input
                     type="text"
                     list={!isSystemLocked && !isTemporal ? `datalist-${key}` : undefined}
-                    value={formData[key] || ''}
+                    value={formData[key] === 'TIMELESS' ? '' : (formData[key] || '')}
                     onChange={(e) => setFormData({ ...formData, [key]: e.target.value })}
-                    disabled={isPending || isSystemLocked}
-                    className={`w-full p-2.5 text-xs border border-gray-200 dark:border-zinc-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm transition-colors ${isSystemLocked ? 'bg-gray-50 dark:bg-zinc-800/50 text-gray-400 dark:text-zinc-500 font-mono text-[10px] cursor-not-allowed' : 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100'}`}
-                    placeholder={isSystemLocked ? 'System Locked' : (isTemporal ? 'e.g. 1990s, 1985~1988' : `e.g. input data...`)}
+                    disabled={isPending || isSystemLocked || formData[key] === 'TIMELESS'}
+                    className={`w-full p-2.5 text-xs border border-gray-200 dark:border-zinc-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-sm transition-colors ${isSystemLocked || formData[key] === 'TIMELESS' ? 'bg-gray-50 dark:bg-zinc-800/50 text-gray-400 dark:text-zinc-500 font-mono text-[10px] cursor-not-allowed placeholder:text-gray-400 dark:placeholder:text-zinc-500' : 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100'}`}
+                    placeholder={isSystemLocked ? 'System Locked' : (isTemporal ? (formData[key] === 'TIMELESS' ? 'Timeless Entity' : 'e.g. 1990s, 1985~1988') : `e.g. input data...`)}
                   />
                   {!isSystemLocked && !isTemporal && (
                     <datalist id={`datalist-${key}`}>
@@ -202,7 +229,7 @@ export default function PropertiesEditor({
                     </datalist>
                   )}
                   
-                  {isTemporal && (formData[key] || liveBounds.start || liveBounds.end) && (
+                  {isTemporal && formData[key] !== 'TIMELESS' && (formData[key] || liveBounds.start || liveBounds.end) && (
                     <div className="mt-2.5 bg-emerald-50/50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/30 p-2.5 rounded-md w-fit">
                       <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-400 uppercase tracking-widest block mb-1">
                         ↳ System Boundaries:
