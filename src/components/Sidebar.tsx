@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { signOut } from "next-auth/react";
 import Link from "next/link";
 import { createNode, searchGraphNodes, checkDuplicateArtifact, getUploadTicket, attachFileToNode, getExactMatchNode, restoreNode } from "@/app/actions";
-import { getMediaDetails } from "@/lib/mediaUtils";
+import { getNodeDisplay } from "@/lib/nodeUtils";
 
 type Node = {
   id: string;
@@ -43,459 +43,388 @@ export default function Sidebar({
 
   // Initialize Dark Mode on mount & Add Resize Listener
   useEffect(() => {
-    if (document.documentElement.classList.contains('dark')) {
-      setIsDark(true);
-    }
-
+    setIsDark(document.documentElement.classList.contains('dark'));
     const handleResize = () => {
-      if (window.innerWidth >= 768) {
-        setIsMobileMenuOpen(false); // Auto-close menu on desktop
-      }
+      if (window.innerWidth >= 768) setIsMobileMenuOpen(false);
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   const toggleDarkMode = () => {
-    if (isDark) {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
-      setIsDark(false);
-    } else {
+    const next = !isDark;
+    setIsDark(next);
+    if (next) {
       document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-      setIsDark(true);
+      localStorage.theme = 'dark';
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.theme = 'light';
     }
   };
 
   // --- Search State ---
-  const [searchTerm, setSearchTerm] = useState("");
-  const [searchedNodes, setSearchedNodes] = useState<Node[] | null>(null);
-  const [isSearching, startTransitionSearch] = useTransition();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Node[]>([]);
+  const [isSearching, startSearchTransition] = useTransition();
 
-  // --- Minting / Upload State ---
-  const [isMinting, setIsMinting] = useState(false);
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    startSearchTransition(async () => {
+      const results = await searchGraphNodes(searchQuery.trim());
+      setSearchResults(results as Node[]);
+    });
+  }, [searchQuery]);
+
+  // --- Universal 4-Gateway State ---
   const [activeGateway, setActiveGateway] = useState<'IDENTITY' | 'PHYSICAL' | 'FILE' | 'URL' | null>(null);
   const [mintLabel, setMintLabel] = useState("");
   const [mintKind, setMintKind] = useState("");
-  
   const [file, setFile] = useState<File | null>(null);
+  const [linkUrl, setLinkUrl] = useState("");
   const [payloadHash, setPayloadHash] = useState("");
-  const [isPending, startTransitionSubmit] = useTransition();
-  const [uploadStatus, setUploadStatus] = useState("");
-
   const [duplicateFound, setDuplicateFound] = useState<Node | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const [isDragging, setIsDragging] = useState(false);
 
-  useEffect(() => {
-    if (searchTerm.trim().length === 0) {
-      setSearchedNodes(null);
-      return;
-    }
-    const delayDebounceFn = setTimeout(() => {
-      startTransitionSearch(async () => {
-        const results = await searchGraphNodes(searchTerm.trim());
-        setSearchedNodes(results as Node[]);
-      });
-    }, 300);
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchTerm]);
-
-  const resetMinting = () => {
-    setIsMinting(false);
+  const handleCloseMinting = () => {
     setActiveGateway(null);
     setMintLabel("");
     setMintKind("");
     setFile(null);
+    setLinkUrl("");
     setPayloadHash("");
     setDuplicateFound(null);
-    setUploadStatus("");
+    setIsDragging(false);
   };
 
-  const handleLinkClick = () => {
-    setIsMobileMenuOpen(false);
-  };
-
-  // --- Track 1: Form (Identity/Physical) ---
-  const handleMintForm = async () => {
-    if (!mintLabel.trim() || !activeGateway) return;
-    if (activeGateway === 'IDENTITY' && !mintKind) return;
-
-    setUploadStatus("Checking records...");
-    
-    // Soft Dedupe Check
-    const exactMatch = await getExactMatchNode(mintLabel.trim(), activeGateway as any);
-    if (exactMatch) {
-      setDuplicateFound(exactMatch as Node);
-      setUploadStatus("");
-      return;
-    }
-
-    startTransitionSubmit(async () => {
-      const newId = await createNode(mintLabel.trim(), activeGateway as "IDENTITY" | "PHYSICAL", activeGateway === 'IDENTITY' ? mintKind : null);
-      router.push(`/?node=${newId}`);
-      resetMinting();
-      setIsMobileMenuOpen(false);
-    });
-  };
-
-  // --- Track 2: Payload (Media) ---
-  const analyzeFile = async (selectedFile: File) => {
-    setFile(selectedFile);
-    setUploadStatus("Hashing payload...");
-
-    try {
-      const arrayBuffer = await selectedFile.arrayBuffer();
-      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-      setPayloadHash(hashHex);
-
-      setUploadStatus("Checking for duplicates...");
-      const existing = await checkDuplicateArtifact(hashHex);
-      if (existing) {
-        setDuplicateFound(existing as Node);
-        setUploadStatus("");
-        return;
-      }
-
-      setMintLabel(selectedFile.name);
-      setUploadStatus("");
-    } catch (e) {
-      setUploadStatus("Analysis failed.");
+  // --- Drag & Drop Handlers ---
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); };
+  const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); };
+  
+  const handleDropForm = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const droppedFile = e.dataTransfer.files?.[0];
+    if (droppedFile) {
+      setFile(droppedFile);
+      setMintLabel(droppedFile.name);
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files?.[0];
-    if (selected) {
-      e.target.value = '';
-      analyzeFile(selected);
+  const executeGlobalMint = async () => {
+    if (activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') {
+      if (!mintLabel.trim()) return;
+      startTransition(async () => {
+         const exactMatch = await getExactMatchNode(mintLabel.trim(), activeGateway);
+         if (exactMatch) {
+           setDuplicateFound(exactMatch as Node);
+           return;
+         }
+         const newId = await createNode(mintLabel.trim(), activeGateway, activeGateway === 'IDENTITY' ? mintKind : null);
+         handleCloseMinting();
+         router.push(`/?node=${newId}`);
+         setIsMobileMenuOpen(false);
+      });
+    } else if (activeGateway === 'FILE') {
+      startTransition(async () => {
+         if (file) {
+           const buffer = await file.arrayBuffer();
+           const hashBuf = await crypto.subtle.digest('SHA-256', buffer);
+           const hex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+           
+           const existing = await checkDuplicateArtifact(hex);
+           if (existing) { setDuplicateFound(existing as Node); return; }
+
+           const newId = await createNode(mintLabel.trim() || file.name, "MEDIA", null);
+           const { uploadUrl, fileUrl } = await getUploadTicket(file.name, file.type);
+           if (uploadUrl && uploadUrl !== 'mock') {
+              await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
+           }
+           await attachFileToNode(newId, fileUrl, file.type, file.size, hex);
+           handleCloseMinting();
+           router.push(`/?node=${newId}`);
+           setIsMobileMenuOpen(false);
+         }
+      });
+    } else if (activeGateway === 'URL') {
+      startTransition(async () => {
+         if (linkUrl) {
+           let hash = linkUrl.trim();
+           const ytMatch = hash.match(/(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
+           if (ytMatch && ytMatch[1]) hash = `youtube:${ytMatch[1]}`;
+           
+           const existing = await checkDuplicateArtifact(hash);
+           if (existing) { setDuplicateFound(existing as Node); return; }
+
+           const newId = await createNode(mintLabel.trim() || linkUrl.trim(), "MEDIA", null);
+           await attachFileToNode(newId, hash.startsWith('youtube:') ? '' : linkUrl.trim(), 'text/html', 0, hash);
+           handleCloseMinting();
+           router.push(`/?node=${newId}`);
+           setIsMobileMenuOpen(false);
+         }
+      });
     }
-  };
-
-  const analyzeUrl = async () => {
-    if (!mintLabel.trim()) return;
-    setUploadStatus("Analyzing URL...");
-    let hash = mintLabel.trim();
-    const ytMatch = hash.match(/(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
-    if (ytMatch && ytMatch[1]) hash = `youtube:${ytMatch[1]}`;
-    
-    setPayloadHash(hash);
-    const existing = await checkDuplicateArtifact(hash);
-    if (existing) {
-      setDuplicateFound(existing as Node);
-      setUploadStatus("");
-      return;
-    }
-    handleMintPayload(hash);
-  };
-
-  const handleMintPayload = async (overrideHash?: string) => {
-    const finalHash = overrideHash || payloadHash;
-    if (!finalHash || !mintLabel.trim()) return;
-
-    startTransitionSubmit(async () => {
-      try {
-        setUploadStatus("Minting record...");
-        const newId = await createNode(mintLabel.trim(), "MEDIA", null);
-
-        let finalFileUrl = finalHash;
-
-        if (activeGateway === 'FILE' && file) {
-          setUploadStatus("Requesting secure upload ticket...");
-          const { uploadUrl, fileUrl } = await getUploadTicket(file.name, file.type);
-          finalFileUrl = fileUrl;
-          if (uploadUrl && uploadUrl !== 'mock-url') {
-             setUploadStatus("Uploading securely to R2...");
-             const uploadResponse = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
-             if (!uploadResponse.ok) throw new Error("Storage rejected the file.");
-          }
-        }
-
-        setUploadStatus("Finalizing graph properties...");
-        await attachFileToNode(newId, finalFileUrl, activeGateway === 'FILE' ? file!.type : 'text/html', activeGateway === 'FILE' ? file!.size : 0, finalHash);
-        
-        router.push(`/?node=${newId}`);
-        resetMinting();
-        setIsMobileMenuOpen(false);
-      } catch (error) {
-        console.error(error);
-        setUploadStatus("Upload failed.");
-      }
-    });
   };
 
   const handleRestoreFromTrash = () => {
     if (!duplicateFound) return;
-    startTransitionSubmit(async () => {
+    startTransition(async () => {
       await restoreNode(duplicateFound.id);
+      handleCloseMinting();
       router.push(`/?node=${duplicateFound.id}`);
-      resetMinting();
       setIsMobileMenuOpen(false);
     });
   };
 
-  const displayNodes = searchedNodes || initialNodes;
+  // --- Rendering Node Lists ---
+  const displayNodes = searchQuery.trim() ? searchResults : initialNodes;
+  
+  const identityNodes = displayNodes.filter(n => n.layer === 'IDENTITY');
+  const physicalNodes = displayNodes.filter(n => n.layer === 'PHYSICAL');
+  const mediaNodes = displayNodes.filter(n => n.layer === 'MEDIA');
+
+  const renderNodeGroup = (title: string, layerNodes: Node[]) => {
+    if (layerNodes.length === 0) return null;
+    return (
+      <div className="mb-6">
+        <h3 className="px-4 py-2 text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-widest mb-1 sticky top-0 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md z-10 border-b border-gray-100 dark:border-zinc-800/50 shadow-sm transition-colors">
+          {title}
+        </h3>
+        <div className="space-y-0.5 px-2">
+          {layerNodes.map(node => {
+            const { icon } = getNodeDisplay(node, activeKinds);
+            const isActive = activeNodeId === node.id;
+            const isTombstone = node.isActive === false;
+
+            return (
+              <Link
+                key={node.id} 
+                href={`/?node=${node.id}`}
+                scroll={false}
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={`w-full text-left px-3 py-2 rounded-md text-sm flex items-center gap-2 transition-colors cursor-pointer ${
+                  isActive 
+                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 font-medium' 
+                    : 'hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-700 dark:text-zinc-300'
+                } ${isTombstone ? 'opacity-50 grayscale' : ''}`}
+              >
+                <span className={`opacity-80 shrink-0 ${isActive ? 'text-blue-600 dark:text-blue-400' : ''}`}>{icon}</span>
+                <div className="flex flex-col min-w-0">
+                  <span className={`truncate ${isTombstone ? 'line-through decoration-gray-400 dark:decoration-zinc-500' : ''}`}>{node.label}</span>
+                  {searchQuery.trim() && node.aliases && node.aliases.length > 0 && node.aliases.some(a => a.toLowerCase().includes(searchQuery.trim().toLowerCase())) && (
+                    <span className="text-[9px] text-gray-400 dark:text-zinc-500 font-mono truncate tracking-tight">
+                      ↳ {node.aliases.find(a => a.toLowerCase().includes(searchQuery.trim().toLowerCase()))}
+                    </span>
+                  )}
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <>
-      {/* MOBILE HEADER (Hamburger Menu) */}
-      <div className="md:hidden fixed top-0 left-0 w-full bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800 z-50 px-4 py-3 flex items-center justify-between shadow-sm transition-colors duration-300">
-        <div className="flex items-center gap-2">
-          <span className="text-xl">📚</span>
-          <h1 className="font-serif font-bold text-xl tracking-tight text-gray-900 dark:text-zinc-100">yathā</h1>
+      {/* MOBILE HEADER */}
+      <div className="md:hidden fixed top-0 left-0 right-0 h-14 bg-white dark:bg-zinc-950 border-b border-gray-200 dark:border-zinc-800 flex items-center justify-between px-4 z-50 transition-colors duration-300">
+        <div className="font-bold text-lg flex items-center gap-2 text-gray-900 dark:text-zinc-100">
+          <span className="text-xl">📚</span> yathā
         </div>
-        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 text-gray-600 dark:text-zinc-400 focus:outline-none cursor-pointer">
-          <span className="text-xl leading-none">{isMobileMenuOpen ? "✕" : "☰"}</span>
+        <button 
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          className="p-2 text-gray-600 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-md cursor-pointer transition-colors"
+        >
+          {isMobileMenuOpen ? '✕' : '☰'}
         </button>
       </div>
 
-      {/* MOBILE OVERLAY */}
+      {/* SIDEBAR OVERLAY (Mobile) */}
       {isMobileMenuOpen && (
-        <div className="md:hidden fixed inset-0 z-40 bg-gray-900/50 dark:bg-black/80 backdrop-blur-sm transition-colors duration-300" onClick={() => setIsMobileMenuOpen(false)} />
+        <div 
+          className="md:hidden fixed inset-0 bg-gray-900/20 dark:bg-black/60 backdrop-blur-sm z-40 transition-colors"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
       )}
 
       {/* SIDEBAR CONTAINER */}
-      <div className={`fixed inset-y-0 left-0 z-50 w-72 bg-white dark:bg-zinc-900 border-r border-gray-200 dark:border-zinc-800 flex flex-col flex-shrink-0 transform transition-all duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        
-        <div className="hidden md:flex p-4 pb-3 items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">📚</span>
-            <h1 className="font-serif font-bold text-xl tracking-tight text-gray-900 dark:text-zinc-100">
-              yathā
-            </h1>
+      <div className={`
+        fixed md:static inset-y-0 left-0 z-50
+        w-72 bg-white dark:bg-zinc-900 border-r border-gray-200 dark:border-zinc-800 flex flex-col h-full shrink-0
+        transform transition-transform duration-300 ease-in-out
+        ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+      `}>
+        {/* BRANDING (Desktop) */}
+        <div className="hidden md:flex p-4 h-16 border-b border-gray-200 dark:border-zinc-800 font-bold text-lg items-center justify-between transition-colors">
+          <div className="flex items-center gap-2 text-gray-900 dark:text-zinc-100">
+            <span className="text-xl">📚</span> yathā
           </div>
-          
-          {/* Dark Mode Toggle */}
           <button 
-            onClick={toggleDarkMode} 
-            className="text-gray-400 hover:text-gray-900 dark:text-zinc-500 dark:hover:text-zinc-100 transition-colors p-1 cursor-pointer"
-            title="Toggle Dark Mode"
+            onClick={toggleDarkMode}
+            className="text-sm p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 transition-colors cursor-pointer"
+            title="Toggle Theme"
           >
             {isDark ? '☀️' : '🌙'}
           </button>
         </div>
 
-        <div className="px-4 pb-4 pt-4 md:pt-0">
+        {/* SEARCH */}
+        <div className="p-4 border-b border-gray-200 dark:border-zinc-800 transition-colors bg-gray-50/50 dark:bg-zinc-950/50 pt-16 md:pt-4">
           <div className="relative">
-            <input 
-              type="text" 
-              placeholder="Search graph..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full p-2 pl-8 text-sm bg-gray-100 dark:bg-zinc-800/50 border border-transparent dark:border-zinc-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-zinc-100 placeholder-gray-500 dark:placeholder-zinc-500 transition-colors"
+            <input
+              type="text"
+              placeholder="Search archive..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full p-2 pl-8 text-sm border border-gray-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors"
             />
-            <span className="absolute left-2.5 top-2.5 text-gray-400 dark:text-zinc-500 text-sm">
-              {isSearching ? '⏳' : '🔍'}
-            </span>
-            {searchTerm && (
-              <button 
-                onClick={() => setSearchTerm("")}
-                className="absolute right-2.5 top-2.5 text-gray-400 hover:text-gray-600 dark:hover:text-zinc-300 cursor-pointer"
-              >
-                ✕
-              </button>
+            <span className="absolute left-2.5 top-2.5 text-gray-400 dark:text-zinc-500 text-xs">🔍</span>
+            {isSearching && (
+              <span className="absolute right-2.5 top-2.5 text-blue-500 text-xs animate-spin">🌀</span>
             )}
           </div>
         </div>
 
-        {canWrite && !isMinting && (
-          <div className="px-4 pb-4">
-            <label className="block text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Mint Record</label>
+        {/* ENTRY GATEWAYS (4-Gateway System) */}
+        {canWrite && !searchQuery.trim() && !activeGateway && (
+          <div className="px-4 py-3 border-b border-gray-200 dark:border-zinc-800 bg-gray-50/30 dark:bg-zinc-900/30 transition-colors">
+            <label className="block text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-widest mb-2">Create Record</label>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => { setIsMinting(true); setActiveGateway('IDENTITY'); }} className="py-2 text-[10px] font-bold uppercase tracking-widest bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50 rounded hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors shadow-sm cursor-pointer flex flex-col items-center gap-1">
-                <span className="text-sm">🟣</span> Concept
+              <button onClick={() => setActiveGateway('IDENTITY')} className="p-2 border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 rounded-md hover:border-blue-300 dark:hover:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left transition-colors cursor-pointer shadow-sm flex items-center gap-2">
+                <span className="text-lg">🟣</span>
+                <span className="font-bold text-[10px] uppercase tracking-widest text-gray-700 dark:text-zinc-300">Concept</span>
               </button>
-              <button onClick={() => { setIsMinting(true); setActiveGateway('PHYSICAL'); }} className="py-2 text-[10px] font-bold uppercase tracking-widest bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 rounded hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors shadow-sm cursor-pointer flex flex-col items-center gap-1">
-                <span className="text-sm">📦</span> Physical
+              <button onClick={() => setActiveGateway('PHYSICAL')} className="p-2 border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 rounded-md hover:border-amber-300 dark:hover:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-900/20 text-left transition-colors cursor-pointer shadow-sm flex items-center gap-2">
+                <span className="text-lg">📦</span>
+                <span className="font-bold text-[10px] uppercase tracking-widest text-gray-700 dark:text-zinc-300">Physical</span>
               </button>
-              <button onClick={() => { setIsMinting(true); setActiveGateway('FILE'); }} className="py-2 text-[10px] font-bold uppercase tracking-widest bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors shadow-sm cursor-pointer flex flex-col items-center gap-1">
-                <span className="text-sm">📄</span> File
+              <button onClick={() => setActiveGateway('FILE')} className="p-2 border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 rounded-md hover:border-emerald-300 dark:hover:border-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-left transition-colors cursor-pointer shadow-sm flex items-center gap-2">
+                <span className="text-lg">📄</span>
+                <span className="font-bold text-[10px] uppercase tracking-widest text-gray-700 dark:text-zinc-300">File</span>
               </button>
-              <button onClick={() => { setIsMinting(true); setActiveGateway('URL'); }} className="py-2 text-[10px] font-bold uppercase tracking-widest bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors shadow-sm cursor-pointer flex flex-col items-center gap-1">
-                <span className="text-sm">🔗</span> URL
+              <button onClick={() => setActiveGateway('URL')} className="p-2 border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 rounded-md hover:border-blue-300 dark:hover:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left transition-colors cursor-pointer shadow-sm flex items-center gap-2">
+                <span className="text-lg">🔗</span>
+                <span className="font-bold text-[10px] uppercase tracking-widest text-gray-700 dark:text-zinc-300">Link</span>
               </button>
             </div>
           </div>
         )}
 
-        {isMinting && (
-          <div className="mx-4 mb-4 p-4 border border-blue-200 dark:border-blue-800/50 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg shadow-inner animate-in fade-in slide-in-from-top-2">
-            <div className="flex justify-between items-center mb-3">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-blue-800 dark:text-blue-400">
-                {activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL' ? '✨ Mint Record' : '☁️ Upload Media'}
+        {/* MINTING PANEL */}
+        {activeGateway && (
+          <div className="p-4 border-b border-gray-200 dark:border-zinc-800 bg-blue-50/50 dark:bg-blue-900/10 animate-in slide-in-from-top-2 transition-colors">
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-blue-800 dark:text-blue-400 flex items-center gap-1.5">
+                {activeGateway === 'FILE' ? '📄 Upload File' : activeGateway === 'URL' ? '🔗 Add Web Link' : activeGateway === 'PHYSICAL' ? '📦 Mint Physical Item' : '🟣 Mint Concept'}
               </span>
-              <button onClick={resetMinting} disabled={isPending} className="text-gray-400 hover:text-gray-800 dark:hover:text-zinc-300 cursor-pointer px-1">✕</button>
+              <button onClick={handleCloseMinting} className="text-gray-400 hover:text-gray-800 dark:hover:text-zinc-200 cursor-pointer">✕</button>
             </div>
 
-            {duplicateFound ? (
-              <div className={`p-3 rounded border mb-3 ${duplicateFound.isActive === false ? 'bg-gray-100 dark:bg-zinc-800 border-gray-300 dark:border-zinc-700' : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50'}`}>
-                {duplicateFound.isActive === false ? (
-                  <>
-                    <p className="text-xs font-bold text-gray-800 dark:text-zinc-200 mb-1 flex items-center gap-1"><span>🗑️</span> Found in Trash</p>
-                    <p className="text-[10px] text-gray-600 dark:text-zinc-400 mb-3 leading-tight">This {activeGateway === 'FILE' || activeGateway === 'URL' ? 'exact payload' : 'name'} exists, but was moved to the trash.</p>
-                    <button onClick={handleRestoreFromTrash} disabled={isPending} className="w-full py-1.5 bg-gray-800 dark:bg-zinc-700 text-white text-xs font-bold rounded hover:bg-gray-900 dark:hover:bg-zinc-600 cursor-pointer shadow-sm transition-colors">
-                      {isPending ? "..." : "Restore & Use"}
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-xs font-bold text-amber-800 dark:text-amber-400 mb-1 flex items-center gap-1"><span>⚠️</span> Conflict</p>
-                    <p className="text-[10px] text-amber-700 dark:text-amber-500 mb-3 leading-tight">This {activeGateway === 'FILE' || activeGateway === 'URL' ? 'exact payload' : 'name'} already exists in the archive.</p>
-                    <div className="flex gap-2">
-                      <Link scroll={false} href={`/?node=${duplicateFound.id}`} onClick={resetMinting} className="flex-1 py-1.5 text-center bg-amber-600 text-white text-xs font-bold rounded shadow-sm hover:bg-amber-700 cursor-pointer">View</Link>
-                      {(activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
-                        <button onClick={handleMintForm} className="flex-1 py-1.5 bg-white dark:bg-zinc-800 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-700/50 text-xs font-bold rounded shadow-sm hover:bg-amber-50 dark:hover:bg-amber-900/30 cursor-pointer">Mint Dup</button>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            ) : activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL' ? (
-              <div className="space-y-3">
-                <input 
-                  type="text" 
-                  placeholder="Name of record..." 
-                  value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isPending}
-                  className="w-full p-2 text-xs border border-gray-200 dark:border-zinc-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100"
-                />
-                {activeGateway === 'IDENTITY' && (
-                  <select 
-                    value={mintKind} onChange={e => setMintKind(e.target.value)} disabled={isPending}
-                    className="w-full p-2 text-xs border border-gray-200 dark:border-zinc-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100"
-                  >
-                    <option value="">Select Classification...</option>
-                    {activeKinds.map(k => <option key={k.id} value={k.id}>{k.icon} {k.label}</option>)}
-                  </select>
-                )}
+            <div className="space-y-3">
+              {(activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
+                <>
+                  <input 
+                    type="text" autoFocus placeholder="Name / Label..." value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isPending}
+                    className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors"
+                  />
+                  {activeGateway === 'IDENTITY' && (
+                    <select value={mintKind} onChange={e => setMintKind(e.target.value)} disabled={isPending} className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors">
+                      <option value="">Select Classification...</option>
+                      {activeKinds.map(k => <option key={k.id} value={k.id}>{k.icon} {k.label}</option>)}
+                    </select>
+                  )}
+                </>
+              )}
+
+              {activeGateway === 'FILE' && (
+                <div className="space-y-3" onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDropForm}>
+                  <input type="file" id="sidebar-file" className="hidden" onChange={e => { if (e.target.files?.[0]) { setFile(e.target.files[0]); setMintLabel(e.target.files[0].name); } }} />
+                  <label htmlFor="sidebar-file" className={`block p-4 border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors ${file ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : isDragging ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-gray-50 dark:hover:bg-zinc-800'}`}>
+                     <span className="block text-2xl mb-1">{file ? '✅' : isDragging ? '📥' : '📄'}</span>
+                     <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 dark:text-zinc-400">{file ? file.name : isDragging ? 'Drop it here!' : 'Select File or Drag & Drop'}</span>
+                  </label>
+                  {file && (
+                     <input type="text" autoFocus placeholder="Artifact Title..." value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isPending} className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors" />
+                  )}
+                </div>
+              )}
+
+              {activeGateway === 'URL' && (
+                <div className="space-y-3">
+                  <input type="url" autoFocus placeholder="https://..." value={linkUrl} onChange={e => setLinkUrl(e.target.value)} disabled={isPending} className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors" />
+                  {linkUrl && (
+                     <input type="text" placeholder="Artifact Title (Optional)..." value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isPending} className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors" />
+                  )}
+                </div>
+              )}
+
+              {duplicateFound && (
+                <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-md text-xs text-amber-800 dark:text-amber-400 shadow-sm transition-colors">
+                  <strong>⚠️ Exact Match Found:</strong> "{duplicateFound.label}" already exists.
+                  {duplicateFound.isActive === false && " (Currently in Trash)."}
+                  <div className="mt-2 flex gap-2">
+                    {duplicateFound.isActive === false ? (
+                      <button onClick={handleRestoreFromTrash} disabled={isPending} className="px-3 py-1.5 bg-gray-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-bold rounded shadow-sm cursor-pointer w-full transition-colors">Restore Record</button>
+                    ) : (
+                      <button onClick={() => { handleCloseMinting(); router.push(`/?node=${duplicateFound.id}`); setIsMobileMenuOpen(false); }} className="px-3 py-1.5 bg-amber-600 text-white font-bold rounded shadow-sm cursor-pointer w-full transition-colors hover:bg-amber-700">View Existing</button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {!duplicateFound && (
                 <button 
-                  onClick={handleMintForm} disabled={isPending || !mintLabel.trim() || (activeGateway === 'IDENTITY' && !mintKind)}
-                  className="w-full py-2 bg-blue-600 text-white text-xs font-bold uppercase tracking-widest rounded shadow-sm hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer"
+                  onClick={executeGlobalMint} 
+                  disabled={isPending || (activeGateway === 'IDENTITY' && (!mintLabel || !mintKind)) || (activeGateway === 'PHYSICAL' && !mintLabel) || (activeGateway === 'FILE' && !file) || (activeGateway === 'URL' && !linkUrl)}
+                  className="w-full py-2 bg-blue-600 dark:bg-blue-500 text-white text-xs font-bold uppercase tracking-widest rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 shadow-sm transition-colors cursor-pointer"
                 >
-                  {isPending ? "Minting..." : "Create"}
+                  {isPending ? "Processing..." : activeGateway === 'FILE' || activeGateway === 'URL' ? "Upload & Mint" : "Mint Record"}
                 </button>
-                {uploadStatus && <p className="text-[10px] text-blue-600 dark:text-blue-400 font-bold animate-pulse text-center">{uploadStatus}</p>}
-              </div>
-            ) : activeGateway === 'FILE' ? (
-              <div className="space-y-3">
-                <input type="file" className="hidden" id="sb-file" onChange={handleFileSelect} disabled={isPending} />
-                <label htmlFor="sb-file" className="block p-4 rounded-lg border-2 border-dashed border-blue-200 dark:border-blue-800/50 text-center transition-colors cursor-pointer bg-white dark:bg-zinc-900 hover:bg-blue-50 dark:hover:bg-blue-900/20">
-                  <span className="text-xl mb-1 block">{file ? '✅' : '📄'}</span>
-                  <span className="text-[10px] text-gray-600 dark:text-zinc-400 font-medium truncate px-2 block">{file ? file.name : 'Click to select file'}</span>
-                </label>
-                {file && !duplicateFound && (
-                   <input 
-                     type="text" 
-                     placeholder="Artifact Title..." 
-                     value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isPending}
-                     className="w-full p-2 text-xs border border-gray-200 dark:border-zinc-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100"
-                   />
-                )}
-                {file && !duplicateFound && (
-                  <button 
-                    onClick={() => handleMintPayload()} disabled={isPending || !payloadHash || !mintLabel.trim()}
-                    className="w-full py-2 bg-blue-600 text-white text-xs font-bold uppercase tracking-widest rounded shadow-sm hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer"
-                  >
-                    {isPending ? "Processing..." : "Upload"}
-                  </button>
-                )}
-                {uploadStatus && <p className="text-[10px] text-blue-600 dark:text-blue-400 font-bold animate-pulse text-center">{uploadStatus}</p>}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <input 
-                  type="url" 
-                  placeholder="https://" 
-                  value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isPending}
-                  className="w-full p-2 text-xs border border-gray-200 dark:border-zinc-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100"
-                />
-                <button 
-                  onClick={analyzeUrl} disabled={isPending || !mintLabel.trim()}
-                  className="w-full py-2 bg-blue-600 text-white text-xs font-bold uppercase tracking-widest rounded shadow-sm hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer"
-                >
-                  {isPending ? "Processing..." : "Link URL"}
-                </button>
-                {uploadStatus && <p className="text-[10px] text-blue-600 dark:text-blue-400 font-bold animate-pulse text-center">{uploadStatus}</p>}
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto px-2 pb-4 space-y-6">
-          {['IDENTITY', 'PHYSICAL', 'MEDIA'].map(layer => {
-            const layerNodes = displayNodes.filter(n => n.layer === layer);
-            if (layerNodes.length === 0) return null;
-            
-            const title = layer === 'IDENTITY' ? 'Abstract Concepts' : layer === 'PHYSICAL' ? 'Physical Holdings' : 'Digital Media';
-
-            return (
-              <div key={layer}>
-                <h3 className="px-2 text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest mb-2 sticky top-0 bg-white dark:bg-zinc-900 py-1 z-10">
-                  {title}
-                </h3>
-                <div className="space-y-0.5">
-                  {layerNodes.map(node => {
-                    let icon = '🟣';
-                    if (layer === 'PHYSICAL') icon = '📦';
-                    else if (layer === 'MEDIA') icon = getMediaDetails(node.properties).icon;
-                    else {
-                      const kindDef = activeKinds.find(k => k.id === node.kind);
-                      if (kindDef) icon = kindDef.icon;
-                    }
-
-                    const isActive = activeNodeId === node.id;
-                    const isTombstone = node.isActive === false;
-
-                    return (
-                      <Link
-                        key={node.id}
-                        href={`/?node=${node.id}`}
-                        scroll={false}
-                        onClick={handleLinkClick}
-                        className={`w-full text-left px-2 py-1.5 rounded-md text-sm flex items-center gap-2 transition-all ${
-                          isActive 
-                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium' 
-                            : 'text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-800 hover:text-gray-900 dark:hover:text-zinc-100'
-                        } ${isTombstone && !isActive ? 'opacity-50 grayscale' : ''}`}
-                      >
-                        <span className="text-xs shrink-0">{icon}</span>
-                        <span className={`truncate flex-1 ${isTombstone ? 'line-through decoration-gray-400 dark:decoration-zinc-500' : ''}`}>
-                          {node.label}
-                        </span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-          
-          {displayNodes.length === 0 && (
-             <div className="p-4 text-center text-gray-400 dark:text-zinc-500 text-xs italic">
-               No records found.
-             </div>
+        {/* DIRECTORY LISTING */}
+        <div className="flex-1 overflow-y-auto bg-white dark:bg-zinc-900 transition-colors py-2">
+          {searchQuery.trim() && displayNodes.length === 0 ? (
+            <div className="text-center p-4 text-gray-500 dark:text-zinc-400 text-sm italic">
+              No records found for "{searchQuery}".
+            </div>
+          ) : (
+            <>
+              {renderNodeGroup("Identities & Concepts", identityNodes)}
+              {renderNodeGroup("Physical Items", physicalNodes)}
+              {renderNodeGroup("Digital Media", mediaNodes)}
+            </>
           )}
         </div>
 
-        {/* CURRENT USER & AUTH / SETTINGS */}
+        {/* FOOTER / USER MENU */}
         {user && (
-          <div className="p-3 border-t border-gray-200 dark:border-zinc-800 bg-gray-50/50 dark:bg-zinc-900/50 flex items-center justify-between">
+          <div className="p-3 border-t border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900/80 flex items-center justify-between transition-colors">
             <div className="flex items-center gap-2 overflow-hidden">
-               {user.image || user.avatar ? (
-                 /* eslint-disable-next-line @next/next/no-img-element */
-                 <img src={user.image || user.avatar} alt={user.name || "User"} className="w-7 h-7 rounded-full shadow-sm object-cover" />
-               ) : (
-                 <div className="w-7 h-7 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-400 rounded-full flex items-center justify-center text-xs font-bold shadow-sm shrink-0 border border-blue-200 dark:border-blue-800">
-                   {user.name?.[0] || user.email?.[0]?.toUpperCase() || 'U'}
-                 </div>
-               )}
-               <div className="flex flex-col min-w-0">
-                 <span className="text-[10px] font-bold text-gray-900 dark:text-zinc-100 truncate leading-tight">{user.name || user.email}</span>
-                 <span className="text-[9px] text-gray-500 dark:text-zinc-400 uppercase tracking-wider truncate leading-tight">{user.role || 'System User'}</span>
-               </div>
+              {user.image ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={user.image} alt="User" className="w-6 h-6 rounded-full object-cover shadow-sm" />
+              ) : (
+                <div className="w-6 h-6 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 rounded-full flex items-center justify-center text-[10px] font-bold shadow-sm">
+                  {(user.name || user.email || "U")[0].toUpperCase()}
+                </div>
+              )}
+              <div className="flex flex-col min-w-0">
+                <span className="text-xs font-bold text-gray-900 dark:text-zinc-100 truncate">{user.name || user.email}</span>
+                <span className="text-[9px] text-gray-500 dark:text-zinc-400 font-mono uppercase tracking-widest truncate">{user.role}</span>
+              </div>
             </div>
-            
-            <div className="flex items-center gap-1">
+
+            <div className="flex items-center gap-1 shrink-0">
               {user.role === 'SUPERUSER' && (
                 <>
                   <Link 
@@ -526,9 +455,8 @@ export default function Sidebar({
         )}
 
         {licenseeName && (
-          <div className="py-2 border-t border-gray-200 dark:border-zinc-800 bg-gray-50/50 dark:bg-zinc-900/50 text-[9px] text-gray-400 dark:text-zinc-500 font-mono uppercase tracking-widest text-center leading-relaxed">
-            Licensed Archive:<br/>
-            <span className="font-bold text-gray-500 dark:text-zinc-400">{licenseeName}</span>
+          <div className="py-2 border-t border-gray-200 dark:border-zinc-800 bg-gray-50/50 dark:bg-zinc-900/50 text-[9px] text-gray-400 dark:text-zinc-500 font-mono tracking-widest uppercase text-center transition-colors">
+            License: {licenseeName}
           </div>
         )}
       </div>

@@ -3,7 +3,8 @@
 import { useState, useTransition, useEffect } from "react";
 import Link from "next/link";
 import EdgeRetractButton from "@/components/EdgeRetractButton";
-import { parseFuzzyTemporal, getInferredHint, getInferredBadge } from "@/lib/dateParser";
+import { parseFuzzyTemporal, getInferredHint, getInferredBadge, formatNodeLifespan } from "@/lib/dateParser";
+import { getNodeDisplay } from "@/lib/nodeUtils";
 import { updateEdgeProperties } from "@/app/actions";
 
 export default function EdgeRow({
@@ -47,50 +48,10 @@ export default function EdgeRow({
   const displayPredicate = isSource ? predDef.forwardLabel : predDef.reverseLabel;
 
   // --------------------------------------------------------------------------
-  // 3-LAYER ICON & LABEL ROUTING
+  // UI DISPLAY ROUTING (Icons, Labels, and Dates extracted to DRY utilities)
   // --------------------------------------------------------------------------
-  let icon = '🟣';
-  let kindLabel = 'Concept';
-
-  if (node.layer === 'PHYSICAL') {
-    icon = '📦';
-    kindLabel = 'Physical Item';
-  } else if (node.layer === 'MEDIA') {
-    const mime = node.properties?.mimeType || '';
-    if (mime.startsWith('image/')) { icon = '🖼️'; kindLabel = 'Image'; }
-    else if (mime.startsWith('video/')) { icon = '🎞️'; kindLabel = 'Video'; }
-    else if (mime.startsWith('audio/')) { icon = '🎵'; kindLabel = 'Audio'; }
-    else if (node.properties?.url) { icon = '🔗'; kindLabel = 'Web Link'; }
-    else if (node.properties?.youtube_id) { icon = '📺'; kindLabel = 'YouTube Video'; }
-    else { icon = '📄'; kindLabel = 'Document'; }
-  } else {
-    const kindDef = activeKinds.find((k: any) => k.id === node.kind);
-    if (kindDef) {
-      icon = kindDef.icon;
-      kindLabel = kindDef.label;
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // TARGET NODE LIFESPAN FORMATTING (Year Level)
-  // --------------------------------------------------------------------------
-  let nodeLifespanStr = null;
-  if (node.temporalInput === 'TIMELESS') {
-    nodeLifespanStr = 'Timeless';
-  } else if (node.temporalInput) {
-    const parsed = parseFuzzyTemporal(node.temporalInput);
-    const s = node.notEarlierThan || parsed.notEarlierThan;
-    const e = node.notLaterThan || parsed.notLaterThan;
-    
-    const startYear = s ? new Date(s).getUTCFullYear().toString() : 'Open';
-    const endYear = e ? new Date(e).getUTCFullYear().toString() : 'Open';
-    
-    if (startYear !== 'Open' || endYear !== 'Open') {
-      nodeLifespanStr = startYear === endYear ? startYear : `${startYear} ~ ${endYear}`;
-    } else {
-      nodeLifespanStr = node.temporalInput;
-    }
-  }
+  const { icon, kindLabel } = getNodeDisplay(node, activeKinds);
+  const nodeLifespanStr = formatNodeLifespan(node);
 
   useEffect(() => {
     if (isEditing && temporalInput !== undefined && temporalInput !== 'TIMELESS') {
