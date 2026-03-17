@@ -6,7 +6,7 @@ import { auth } from "@/auth";
 
 export const metadata: Metadata = {
   title: "yathā",
-  description: "Truth over convenience",
+  description: "Explore your world as it is.",
 };
 
 export default async function RootLayout({
