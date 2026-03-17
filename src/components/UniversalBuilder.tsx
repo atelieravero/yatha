@@ -3,8 +3,19 @@
 import { useState, useTransition, useEffect } from "react";
 import { assertEdge, createNode, getUploadTicket, attachFileToNode, checkDuplicateArtifact, createPredicate, getExactMatchNode, restoreNode } from "@/app/actions";
 import { SYSTEM_PREDICATES } from "@/db/schema";
+import { getInferredHint } from "@/lib/dateParser";
 
-type MinimalNode = { id: string; label: string; layer: "IDENTITY" | "PHYSICAL" | "MEDIA"; kind?: string | null; aliases?: string[]; isActive?: boolean };
+type MinimalNode = { 
+  id: string; 
+  label: string; 
+  layer: "IDENTITY" | "PHYSICAL" | "MEDIA"; 
+  kind?: string | null; 
+  aliases?: string[]; 
+  isActive?: boolean;
+  notEarlierThan?: string | Date | null;
+  notLaterThan?: string | Date | null;
+};
+
 type Kind = { id: string; label: string; icon: string; isActive: boolean };
 
 type Predicate = { 
@@ -78,6 +89,7 @@ export default function UniversalBuilder({
   const [selectedPredicateId, setSelectedPredicateId] = useState("");
   const [selectedPredicateLabel, setSelectedPredicateLabel] = useState("");
   const [temporalInput, setTemporalInput] = useState("");
+  const [prevTemporalInput, setPrevTemporalInput] = useState("");
   const [locator, setLocator] = useState("");
 
   // Inline Predicate Creator State
@@ -105,6 +117,7 @@ export default function UniversalBuilder({
       setSelectedPredicateId("");
       setSelectedPredicateLabel("");
       setTemporalInput("");
+      setPrevTemporalInput("");
       setLocator("");
       
       setIsCreatingPredicate(false);
@@ -421,6 +434,28 @@ export default function UniversalBuilder({
       if (typeof window !== 'undefined') window.location.reload();
     });
   };
+
+  // --------------------------------------------------------------------------
+  // INFERRED PLACEHOLDER CALCULATION
+  // --------------------------------------------------------------------------
+  let temporalPlaceholder = "e.g. 1995~1998";
+  if (temporalInput === 'TIMELESS') {
+    temporalPlaceholder = "Timeless Relationship";
+  } else if (targetId) {
+    const targetNode = allNodes.find(n => n.id === targetId);
+    const aStart = sourceNode.notEarlierThan ? new Date(sourceNode.notEarlierThan).getTime() : null;
+    const aEnd = sourceNode.notLaterThan ? new Date(sourceNode.notLaterThan).getTime() : null;
+    const bStart = targetNode?.notEarlierThan ? new Date(targetNode.notEarlierThan).getTime() : null;
+    const bEnd = targetNode?.notLaterThan ? new Date(targetNode.notLaterThan).getTime() : null;
+    
+    const maxStart = aStart && bStart ? Math.max(aStart, bStart) : (aStart || bStart);
+    const minEnd = aEnd && bEnd ? Math.min(aEnd, bEnd) : (aEnd || bEnd);
+
+    // Only show inference if they logically overlap (or have open ends)
+    if (!(maxStart && minEnd && maxStart > minEnd) && (maxStart || minEnd)) {
+      temporalPlaceholder = getInferredHint(maxStart, minEnd);
+    }
+  }
 
   // --------------------------------------------------------------------------
   // RENDER HELPERS
@@ -758,8 +793,12 @@ export default function UniversalBuilder({
                                 type="checkbox" 
                                 checked={temporalInput === 'TIMELESS'}
                                 onChange={(e) => {
-                                  if (e.target.checked) setTemporalInput('TIMELESS');
-                                  else setTemporalInput('');
+                                  if (e.target.checked) {
+                                    setPrevTemporalInput(temporalInput !== 'TIMELESS' ? temporalInput : "");
+                                    setTemporalInput('TIMELESS');
+                                  } else {
+                                    setTemporalInput(prevTemporalInput);
+                                  }
                                 }}
                                 className="sr-only peer"
                               />
@@ -769,11 +808,11 @@ export default function UniversalBuilder({
                         </div>
                         <input 
                           type="text" 
-                          placeholder={temporalInput === 'TIMELESS' ? 'Timeless Relationship' : 'e.g. 1995~1998'} 
+                          placeholder={temporalPlaceholder} 
                           value={temporalInput === 'TIMELESS' ? '' : temporalInput} 
                           onChange={(e) => setTemporalInput(e.target.value)} 
                           disabled={temporalInput === 'TIMELESS'}
-                          className={`w-full p-2.5 text-sm border border-gray-300 dark:border-zinc-700 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors ${temporalInput === 'TIMELESS' ? 'bg-gray-100 dark:bg-zinc-800/50 cursor-not-allowed placeholder-gray-400 dark:placeholder-zinc-500' : 'bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100'}`} 
+                          className={`w-full p-2.5 text-sm border border-gray-300 dark:border-zinc-700 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors ${temporalInput === 'TIMELESS' ? 'bg-gray-100 dark:bg-zinc-800/50 cursor-not-allowed placeholder-gray-400 dark:placeholder-zinc-500' : 'bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-500'}`} 
                         />
                       </div>
                       

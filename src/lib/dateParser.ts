@@ -104,3 +104,22 @@ export function parseFuzzyTemporal(fuzzyDateStr?: string | null): { notEarlierTh
   }
   return {};
 }
+
+export function formatInferredYear(date?: Date | string | null | number) {
+  if (!date) return 'Open';
+  const d = new Date(date);
+  return isNaN(d.getTime()) ? 'Open' : d.getUTCFullYear().toString();
+}
+
+export function getInferredHint(start?: Date | string | null | number, end?: Date | string | null | number) {
+  const startYear = formatInferredYear(start);
+  const endYear = formatInferredYear(end);
+  if (startYear === 'Open' && endYear === 'Open') return "e.g. 1995~1998";
+  return startYear === endYear ? `Hint: ${startYear}` : `Hint: ${startYear} → ${endYear}`;
+}
+
+export function getInferredBadge(start?: Date | string | null | number, end?: Date | string | null | number) {
+  const startYear = formatInferredYear(start);
+  const endYear = formatInferredYear(end);
+  return startYear === endYear ? `[Inferred: ${startYear}]` : `[Inferred: ${startYear} → ${endYear}]`;
+}

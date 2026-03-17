@@ -3,15 +3,8 @@
 import { useState, useTransition, useEffect } from "react";
 import Link from "next/link";
 import EdgeRetractButton from "@/components/EdgeRetractButton";
-import { parseFuzzyTemporal } from "@/lib/dateParser";
+import { parseFuzzyTemporal, getInferredHint, getInferredBadge } from "@/lib/dateParser";
 import { updateEdgeProperties } from "@/app/actions";
-
-// Helper for formatting the inferred bounds ghost badge
-const formatInferredYear = (date?: Date | string | null) => {
-  if (!date) return 'Open';
-  const d = new Date(date);
-  return isNaN(d.getTime()) ? 'Open' : d.getUTCFullYear();
-};
 
 export default function EdgeRow({
   edge,
@@ -45,6 +38,7 @@ export default function EdgeRow({
   const [isEditing, setIsEditing] = useState(false);
   
   const [temporalInput, setTemporalInput] = useState(edge.temporalInput || "");
+  const [prevTemporalInput, setPrevTemporalInput] = useState("");
   const [locator, setLocator] = useState(edge.properties?.locator || "");
   const [liveBounds, setLiveBounds] = useState<{start?: Date, end?: Date}>({});
   
@@ -92,6 +86,16 @@ export default function EdgeRow({
     });
   };
 
+  // --------------------------------------------------------------------------
+  // INFERRED PLACEHOLDER CALCULATION
+  // --------------------------------------------------------------------------
+  let temporalPlaceholder = "e.g. 1995~1998";
+  if (temporalInput === 'TIMELESS') {
+    temporalPlaceholder = "Timeless Relationship";
+  } else if (inferredBounds) {
+    temporalPlaceholder = getInferredHint(effectiveStart, effectiveEnd);
+  }
+
   if (isEditing && !hideEdit) {
     return (
       <div className="p-4 bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/50 rounded-lg shadow-sm animate-in fade-in flex flex-col gap-3">
@@ -103,7 +107,7 @@ export default function EdgeRow({
           <button onClick={() => setIsEditing(false)} disabled={isPending} className="text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 cursor-pointer">✕</button>
         </div>
         
-        {/* Changed from grid-cols-2 to flex-col to prevent squishing */}
+        {/* Flex-col layout prevents inputs from squishing together in tight spaces */}
         <div className="flex flex-col gap-4">
           <div>
             <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
@@ -115,8 +119,12 @@ export default function EdgeRow({
                     type="checkbox" 
                     checked={temporalInput === 'TIMELESS'}
                     onChange={(e) => {
-                      if (e.target.checked) setTemporalInput('TIMELESS');
-                      else setTemporalInput('');
+                      if (e.target.checked) {
+                        setPrevTemporalInput(temporalInput !== 'TIMELESS' ? temporalInput : "");
+                        setTemporalInput('TIMELESS');
+                      } else {
+                        setTemporalInput(prevTemporalInput);
+                      }
                     }}
                     className="sr-only peer"
                   />
@@ -129,8 +137,8 @@ export default function EdgeRow({
               value={temporalInput === 'TIMELESS' ? '' : temporalInput}
               onChange={e => setTemporalInput(e.target.value)}
               disabled={isPending || temporalInput === 'TIMELESS'}
-              placeholder={temporalInput === 'TIMELESS' ? 'Timeless Relationship' : 'e.g. 1995~1998'}
-              className={`w-full p-2 text-xs border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors ${temporalInput === 'TIMELESS' ? 'bg-gray-100 dark:bg-zinc-800/50 cursor-not-allowed placeholder-gray-400 dark:placeholder-zinc-500' : 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100'}`}
+              placeholder={temporalPlaceholder}
+              className={`w-full p-2 text-xs border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors ${temporalInput === 'TIMELESS' ? 'bg-gray-100 dark:bg-zinc-800/50 cursor-not-allowed placeholder-gray-400 dark:placeholder-zinc-500' : 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-500'}`}
             />
             {temporalInput !== 'TIMELESS' && (temporalInput || liveBounds.start || liveBounds.end) && (
               <div className="mt-2 bg-emerald-50/50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/30 p-2.5 rounded-md w-fit">
@@ -211,7 +219,7 @@ export default function EdgeRow({
           <span className="text-[10px] font-mono bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 px-1.5 py-0.5 rounded border border-gray-200 dark:border-zinc-700 transition-colors" title="Relationship Temporal Bounds">
             ⏱ {edge.temporalInput}
           </span>
-        ) : inferredBounds ? (
+        ) : (inferredBounds && !hideEdit) ? (
           <span 
             onClick={(e) => {
               e.preventDefault();
@@ -220,7 +228,7 @@ export default function EdgeRow({
             className={`text-[10px] font-mono bg-transparent text-gray-400 dark:text-zinc-500 px-1.5 py-0.5 rounded border border-dashed border-gray-300 dark:border-zinc-700 transition-colors ${canWrite && !hideEdit && !isTargetDead ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-zinc-800/50 hover:text-gray-600 dark:hover:text-zinc-300' : ''}`} 
             title="Calculated from node lifespans. Click to define explicit bounds."
           >
-            ⏱ [Inferred: {formatInferredYear(effectiveStart)} → {formatInferredYear(effectiveEnd)}]
+            ⏱ {getInferredBadge(effectiveStart, effectiveEnd)}
           </span>
         ) : null}
         

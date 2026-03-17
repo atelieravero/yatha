@@ -25,15 +25,18 @@ export default function PropertiesEditor({
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<Record<string, string>>(initialProps || {});
+  const [prevTemporalInput, setPrevTemporalInput] = useState("");
   const [isPending, startTransition] = useTransition();
 
   const [liveBounds, setLiveBounds] = useState<{start?: Date, end?: Date}>({});
 
   // 1. Calculate live temporal bounds as the user types
   useEffect(() => {
-    if (isEditing && formData['temporal_input'] !== undefined) {
+    if (isEditing && formData['temporal_input'] !== undefined && formData['temporal_input'] !== 'TIMELESS') {
       const parsed = parseFuzzyTemporal(formData['temporal_input']);
       setLiveBounds({ start: parsed.notEarlierThan, end: parsed.notLaterThan });
+    } else if (formData['temporal_input'] === 'TIMELESS') {
+      setLiveBounds({});
     }
   }, [formData, isEditing]);
 
@@ -43,6 +46,7 @@ export default function PropertiesEditor({
   useEffect(() => {
     setIsEditing(false);
     setFormData(initialProps || {});
+    setPrevTemporalInput("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodeId]);
 
@@ -102,9 +106,10 @@ export default function PropertiesEditor({
             onClick={() => {
                // Guarantee fresh database props are loaded into the form before opening
                setFormData(initialProps || {}); 
+               setPrevTemporalInput("");
                setIsEditing(true);
                
-               if (initialProps.temporal_input) {
+               if (initialProps.temporal_input && initialProps.temporal_input !== 'TIMELESS') {
                  const parsed = parseFuzzyTemporal(initialProps.temporal_input);
                  setLiveBounds({ start: parsed.notEarlierThan, end: parsed.notLaterThan });
                } else {
@@ -121,7 +126,7 @@ export default function PropertiesEditor({
         {layer === 'IDENTITY' ? (
           <div className="flex flex-col gap-1 pr-16">
             <div className="flex flex-wrap items-baseline gap-3">
-              {initialProps.temporal_input && <span className="font-semibold text-gray-900 dark:text-zinc-100">{initialProps.temporal_input}</span>}
+              {initialProps.temporal_input && <span className="font-semibold text-gray-900 dark:text-zinc-100">{initialProps.temporal_input === 'TIMELESS' ? 'Timeless' : initialProps.temporal_input}</span>}
               {initialProps.standardized_id && <span className="font-mono text-xs text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">{initialProps.standardized_id}</span>}
               {!initialProps.temporal_input && !initialProps.standardized_id && displayProps.length === 0 && (
                 <span className="italic text-gray-400 dark:text-zinc-500 text-xs">No intrinsic properties defined.</span>
@@ -140,7 +145,7 @@ export default function PropertiesEditor({
                <span className="italic text-gray-400 dark:text-zinc-500 text-xs">No intrinsic properties defined.</span>
              ) : (
                <>
-                 {initialProps.temporal_input && <span className="font-semibold text-gray-900 dark:text-zinc-100">{initialProps.temporal_input}</span>}
+                 {initialProps.temporal_input && <span className="font-semibold text-gray-900 dark:text-zinc-100">{initialProps.temporal_input === 'TIMELESS' ? 'Timeless' : initialProps.temporal_input}</span>}
                  {displayProps.map(([key, val]) => (
                    <span key={key} className={key === 'hash' || key === 'url' ? "text-gray-500 dark:text-zinc-400 font-mono text-[10px] break-all bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 px-1.5 py-0.5 rounded" : "text-gray-800 dark:text-zinc-200 font-medium"}>
                      {String(val)}
@@ -186,10 +191,11 @@ export default function PropertiesEditor({
                         checked={formData[key] === 'TIMELESS'}
                         onChange={(e) => {
                           if (e.target.checked) {
+                            setPrevTemporalInput(formData[key] !== 'TIMELESS' ? (formData[key] || "") : "");
                             setFormData({ ...formData, [key]: 'TIMELESS' });
                             setLiveBounds({});
                           } else {
-                            setFormData({ ...formData, [key]: '' });
+                            setFormData({ ...formData, [key]: prevTemporalInput });
                           }
                         }}
                         className="sr-only peer"
