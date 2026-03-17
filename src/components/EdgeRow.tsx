@@ -71,6 +71,27 @@ export default function EdgeRow({
     }
   }
 
+  // --------------------------------------------------------------------------
+  // TARGET NODE LIFESPAN FORMATTING (Year Level)
+  // --------------------------------------------------------------------------
+  let nodeLifespanStr = null;
+  if (node.temporalInput === 'TIMELESS') {
+    nodeLifespanStr = 'Timeless';
+  } else if (node.temporalInput) {
+    const parsed = parseFuzzyTemporal(node.temporalInput);
+    const s = node.notEarlierThan || parsed.notEarlierThan;
+    const e = node.notLaterThan || parsed.notLaterThan;
+    
+    const startYear = s ? new Date(s).getUTCFullYear().toString() : 'Open';
+    const endYear = e ? new Date(e).getUTCFullYear().toString() : 'Open';
+    
+    if (startYear !== 'Open' || endYear !== 'Open') {
+      nodeLifespanStr = startYear === endYear ? startYear : `${startYear} ~ ${endYear}`;
+    } else {
+      nodeLifespanStr = node.temporalInput;
+    }
+  }
+
   useEffect(() => {
     if (isEditing && temporalInput !== undefined && temporalInput !== 'TIMELESS') {
       const parsed = parseFuzzyTemporal(temporalInput);
@@ -199,8 +220,8 @@ export default function EdgeRow({
             {!isTargetDead && node.aliases && node.aliases.length > 0 && (
               <span className="text-gray-400 dark:text-zinc-500 font-normal ml-1.5 text-[10px]">({node.aliases.join(', ')})</span>
             )}
-            {!isTargetDead && node.temporalInput && (
-              <span className="text-gray-400 dark:text-zinc-500 font-mono ml-1.5 text-[10px]">[{node.temporalInput}]</span>
+            {!isTargetDead && nodeLifespanStr && (
+              <span className="text-gray-400 dark:text-zinc-500 font-mono ml-1.5 text-[10px]">[{nodeLifespanStr}]</span>
             )}
           </span>
         </Link>
