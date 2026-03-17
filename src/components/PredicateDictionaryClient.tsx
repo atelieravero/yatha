@@ -178,23 +178,42 @@ export default function PredicateDictionaryClient({
     });
   };
 
-  // --- Sub-components ---
+  // --- Sub-components (Upgraded Segmented Buttons) ---
   const LayerSelector = ({ title, layers, setLayers, kind, setKind, disabled }: any) => (
-    <div className="bg-gray-50 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50 rounded-md p-3 transition-colors">
+    <div className="bg-gray-50 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50 rounded-md p-3 transition-colors w-full">
       <label className="block text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-widest mb-2">{title}</label>
-      <div className="flex gap-4 mb-2">
-        {['IDENTITY', 'PHYSICAL', 'MEDIA'].map(l => (
-          <label key={l} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-zinc-300 cursor-pointer">
-            <input type="checkbox" disabled={disabled} checked={layers.includes(l)} onChange={() => toggleLayer(layers, setLayers, l)} className="rounded border-gray-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-blue-600 focus:ring-blue-500 transition-colors" />
-            {l === 'IDENTITY' ? 'Concept' : l === 'PHYSICAL' ? 'Physical' : 'Media'}
-          </label>
-        ))}
+      
+      <div className="flex gap-2 mb-3">
+        {['IDENTITY', 'PHYSICAL', 'MEDIA'].map(l => {
+          const isActive = layers.includes(l);
+          return (
+            <button
+              key={l}
+              type="button"
+              disabled={disabled}
+              onClick={() => toggleLayer(layers, setLayers, l)}
+              className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded border transition-colors shadow-sm ${
+                isActive 
+                  ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800/50' 
+                  : 'bg-white dark:bg-zinc-900 text-gray-500 dark:text-zinc-500 border-gray-200 dark:border-zinc-700 hover:bg-gray-50 dark:hover:bg-zinc-800'
+              } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+              {l === 'IDENTITY' ? 'Concept' : l === 'PHYSICAL' ? 'Physical' : 'Media'}
+            </button>
+          );
+        })}
       </div>
+
       {layers.includes('IDENTITY') && (
-        <div className="mt-2 pt-2 border-t border-gray-200 dark:border-zinc-700/50 animate-in fade-in transition-colors">
-          <select value={kind} onChange={e => setKind(e.target.value)} disabled={disabled} className="w-full p-1.5 text-xs border border-gray-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none transition-colors">
+        <div className="animate-in fade-in transition-colors">
+          <select 
+            value={kind} 
+            onChange={e => setKind(e.target.value)} 
+            disabled={disabled} 
+            className="w-full p-2 text-xs border border-gray-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none transition-colors shadow-sm"
+          >
             <option value="">No Default Classification...</option>
-            {activeKinds.map(k => <option key={k.id} value={k.id}>{k.icon} {k.label}</option>)}
+            {activeKinds.map((k: any) => <option key={k.id} value={k.id}>{k.icon} {k.label}</option>)}
           </select>
         </div>
       )}
@@ -213,31 +232,31 @@ export default function PredicateDictionaryClient({
           
           <div className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-gray-500 dark:text-zinc-400 uppercase mb-1">Forward Label</label>
+              <label className="block text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-widest mb-1.5">Forward Label</label>
               <input
                 type="text" placeholder="e.g. authored by" value={newForward}
                 onChange={(e) => { setNewForward(e.target.value); setCreateError(null); }} disabled={isPending}
-                className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors"
+                className="w-full p-2.5 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors font-medium"
               />
             </div>
 
             <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-zinc-400 font-medium cursor-pointer py-1">
-              <input type="checkbox" checked={isSymmetric} onChange={e => setIsSymmetric(e.target.checked)} className="rounded border-blue-300 dark:border-blue-700 bg-white dark:bg-zinc-900 text-blue-600 focus:ring-blue-500 w-4 h-4 transition-colors" />
+              <input type="checkbox" checked={isSymmetric} onChange={e => setIsSymmetric(e.target.checked)} className="rounded border-blue-300 dark:border-blue-700 bg-white dark:bg-zinc-900 text-blue-600 focus:ring-blue-500 w-4 h-4 transition-colors cursor-pointer" />
               Is symmetric (e.g. "married to")
             </label>
 
             {!isSymmetric && (
               <div className="animate-in fade-in slide-in-from-top-1">
-                <label className="block text-xs font-bold text-gray-500 dark:text-zinc-400 uppercase mb-1">Reverse Label</label>
+                <label className="block text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-widest mb-1.5">Reverse Label</label>
                 <input
                   type="text" placeholder="e.g. author of" value={newReverse}
                   onChange={(e) => { setNewReverse(e.target.value); setCreateError(null); }} disabled={isPending}
-                  className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors"
+                  className="w-full p-2.5 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors font-medium"
                 />
               </div>
             )}
 
-            <div className="space-y-3 pt-2">
+            <div className="space-y-4 pt-2">
               <LayerSelector title="Source Requirements" layers={newSourceLayers} setLayers={setNewSourceLayers} kind={newSourceKind} setKind={setNewSourceKind} disabled={isPending} />
               {!isSymmetric && (
                 <LayerSelector title="Target Requirements" layers={newTargetLayers} setLayers={setNewTargetLayers} kind={newTargetKind} setKind={setNewTargetKind} disabled={isPending} />
@@ -256,7 +275,7 @@ export default function PredicateDictionaryClient({
 
             <button
               onClick={handleCreate} disabled={isPending || !newForward.trim() || (!isSymmetric && !newReverse.trim())}
-              className="w-full px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white text-sm font-medium rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 transition-colors shadow-sm cursor-pointer"
+              className="w-full px-4 py-2.5 bg-blue-600 dark:bg-blue-500 text-white text-xs uppercase tracking-widest font-bold rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 transition-colors shadow-sm cursor-pointer mt-2"
             >
               {isPending ? "Minting..." : "Create Pair"}
             </button>
@@ -271,67 +290,66 @@ export default function PredicateDictionaryClient({
             <span>📖</span> Active Connections
           </h2>
           
-          <div className="space-y-3">
+          <div className="space-y-4">
             {activePredicates.map(pred => {
               const count = edgeCounts[pred.id] || 0;
               const isMigrating = migratingId === pred.id;
               const isEditing = editingId === pred.id;
 
               return (
-                <div key={pred.id} className={`bg-white dark:bg-zinc-900 border rounded-lg p-4 shadow-sm transition-all hover:shadow-md ${pred.isSystem ? 'border-amber-200 dark:border-amber-800/50 bg-amber-50/10 dark:bg-amber-900/10' : 'border-gray-200 dark:border-zinc-800'}`}>
+                <div key={pred.id} className={`bg-white dark:bg-zinc-900 border rounded-xl p-5 shadow-sm transition-all hover:shadow-md ${isEditing ? 'border-blue-200 dark:border-blue-800/50 shadow-md ring-1 ring-blue-50 dark:ring-blue-900/10' : pred.isSystem ? 'border-amber-200 dark:border-amber-800/50 bg-amber-50/10 dark:bg-amber-900/10' : 'border-gray-200 dark:border-zinc-800'}`}>
                   
                   {isEditing ? (
-                    <div className="flex flex-col gap-4 animate-in fade-in">
-                      <div className="flex flex-col gap-2">
-                        <div className="flex gap-2 items-center">
-                           <span className="w-16 text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase text-right">Forward</span>
-                           <input type="text" value={editForward} onChange={(e) => { setEditForward(e.target.value); setEditError(null); }} className="flex-1 p-2 text-sm border border-blue-300 dark:border-blue-700/50 rounded bg-transparent dark:bg-zinc-900 focus:ring-2 focus:ring-blue-500 outline-none font-bold text-gray-900 dark:text-zinc-100 transition-colors" />
-                        </div>
-                        <div className="flex gap-2 items-center sm:ml-18">
-                          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-zinc-400 font-medium cursor-pointer">
-                            <input type="checkbox" checked={editSymmetric} onChange={e => setEditSymmetric(e.target.checked)} className="rounded border-blue-300 dark:border-blue-700 bg-white dark:bg-zinc-900 text-blue-600 focus:ring-blue-500 transition-colors" />
-                            Is symmetric
-                          </label>
+                    <div className="flex flex-col gap-5 animate-in fade-in bg-gray-50/50 dark:bg-zinc-900/50 -mx-2 p-4 rounded-xl border border-gray-100 dark:border-zinc-800 transition-colors">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                           <label className="block text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-widest mb-1.5">Forward Label</label>
+                           <input type="text" value={editForward} onChange={(e) => { setEditForward(e.target.value); setEditError(null); }} className="w-full p-2.5 text-sm border border-blue-300 dark:border-blue-700/50 rounded-md bg-white dark:bg-zinc-950 focus:ring-2 focus:ring-blue-500 outline-none font-bold text-gray-900 dark:text-zinc-100 transition-colors shadow-sm" />
                         </div>
                         {!editSymmetric && (
-                          <div className="flex gap-2 items-center">
-                            <span className="w-16 text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase text-right">Reverse</span>
-                            <input type="text" value={editReverse} onChange={(e) => { setEditReverse(e.target.value); setEditError(null); }} className="flex-1 p-2 text-sm border border-blue-300 dark:border-blue-700/50 rounded bg-transparent dark:bg-zinc-900 focus:ring-2 focus:ring-blue-500 outline-none text-gray-700 dark:text-zinc-300 transition-colors" />
+                          <div>
+                            <label className="block text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-widest mb-1.5">Reverse Label</label>
+                            <input type="text" value={editReverse} onChange={(e) => { setEditReverse(e.target.value); setEditError(null); }} className="w-full p-2.5 text-sm border border-blue-300 dark:border-blue-700/50 rounded-md bg-white dark:bg-zinc-950 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 dark:text-zinc-100 transition-colors shadow-sm font-medium" />
                           </div>
                         )}
                       </div>
 
-                      <div className="sm:ml-18 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <LayerSelector title="Source Limits" layers={editSourceLayers} setLayers={editSourceLayers} kind={editSourceKind} setKind={setEditSourceKind} disabled={isPending} />
+                      <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-zinc-400 font-medium cursor-pointer w-fit">
+                        <input type="checkbox" checked={editSymmetric} onChange={e => setEditSymmetric(e.target.checked)} className="rounded border-blue-300 dark:border-blue-700 bg-white dark:bg-zinc-900 text-blue-600 focus:ring-blue-500 transition-colors w-4 h-4 cursor-pointer" />
+                        Is symmetric (e.g. "married to")
+                      </label>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <LayerSelector title="Source Limits" layers={editSourceLayers} setLayers={setEditSourceLayers} kind={editSourceKind} setKind={setEditSourceKind} disabled={isPending} />
                         {!editSymmetric && (
                           <LayerSelector title="Target Limits" layers={editTargetLayers} setLayers={setEditTargetLayers} kind={editTargetKind} setKind={setEditTargetKind} disabled={isPending} />
                         )}
                       </div>
 
-                      <div className="sm:ml-18 p-3 bg-blue-50/50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/50 rounded-md text-xs text-gray-700 dark:text-zinc-300 transition-colors">
+                      <div className="p-3 bg-blue-50/50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/50 rounded-md text-xs text-gray-700 dark:text-zinc-300 transition-colors shadow-inner">
                          <strong>{getLayerSummaryText(editSourceLayers, editSourceKind)}</strong> can be <em>"{editForward || '...'}"</em> <strong>{getLayerSummaryText(editSymmetric ? editSourceLayers : editTargetLayers, editSymmetric ? editSourceKind : editTargetKind)}</strong>.
                       </div>
                       
-                      <div className="flex items-center gap-2 sm:ml-18 pt-2 border-t border-gray-100 dark:border-zinc-800 transition-colors">
-                        <button onClick={() => handleEditSave(pred.id)} disabled={isPending} className="px-4 py-1.5 bg-blue-600 dark:bg-blue-500 text-white text-xs font-bold rounded hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 cursor-pointer transition-colors">
+                      <div className="flex items-center gap-2 pt-3 border-t border-gray-200 dark:border-zinc-800 transition-colors">
+                        <button onClick={() => handleEditSave(pred.id)} disabled={isPending} className="px-5 py-2 bg-blue-600 dark:bg-blue-500 text-white text-xs font-bold uppercase tracking-widest rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 cursor-pointer shadow-sm transition-colors">
                           {isPending ? "..." : "Save Pair"}
                         </button>
-                        <button onClick={() => { setEditingId(null); setEditError(null); }} disabled={isPending} className="px-3 py-1.5 text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200 text-xs font-bold cursor-pointer transition-colors">
+                        <button onClick={() => { setEditingId(null); setEditError(null); }} disabled={isPending} className="px-4 py-2 text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200 text-xs font-bold cursor-pointer transition-colors">
                           Cancel
                         </button>
                       </div>
-                      {editError && <p className="text-xs text-red-500 dark:text-red-400 font-medium sm:ml-18 mt-1">{editError}</p>}
+                      {editError && <p className="text-xs text-red-500 dark:text-red-400 font-medium mt-1">{editError}</p>}
                     </div>
                   ) : (
-                    <div className="flex flex-col gap-3">
+                    <div className="flex flex-col gap-4">
                       <div className="flex items-center justify-between flex-wrap gap-4">
                         <div>
                           {pred.isSystem && (
-                             <span className="inline-block px-2 py-0.5 bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold uppercase tracking-widest rounded mb-1.5 border border-amber-200 dark:border-amber-800/50 transition-colors">
+                             <span className="inline-block px-2 py-0.5 bg-amber-100 dark:bg-amber-900/20 text-amber-800 dark:text-amber-400 text-[10px] font-bold uppercase tracking-widest rounded mb-2 border border-amber-200 dark:border-amber-800/50 transition-colors">
                                🔒 System Core
                              </span>
                           )}
-                          <div className="flex items-center gap-2 font-mono text-sm">
+                          <div className="flex items-center gap-2 font-mono text-base">
                             <span className="font-bold text-gray-900 dark:text-zinc-100">{pred.forwardLabel}</span>
                             {!pred.isSymmetric && (
                               <>
@@ -343,22 +361,22 @@ export default function PredicateDictionaryClient({
                         </div>
                         
                         <div className="flex items-center gap-3">
-                          <span className="text-xs font-medium px-2.5 py-1 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 rounded-full whitespace-nowrap transition-colors">
+                          <span className="text-xs font-medium px-3 py-1 bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 rounded-full whitespace-nowrap transition-colors">
                             {count} {count === 1 ? 'edge' : 'edges'}
                           </span>
                           
                           {!pred.isSystem && (
                             <div className="flex gap-1 ml-2">
-                              <button onClick={() => handleEditStart(pred)} disabled={isPending || isMigrating} className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 px-2.5 py-1.5 rounded transition-colors cursor-pointer">
+                              <button onClick={() => handleEditStart(pred)} disabled={isPending || isMigrating} className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 px-3 py-1.5 rounded transition-colors cursor-pointer">
                                 Edit
                               </button>
                               
                               {count === 0 ? (
-                                <button onClick={() => { if (window.confirm(`Are you sure you want to deactivate "${pred.forwardLabel}"?`)) handleDeactivateEmpty(pred.id); }} disabled={isPending} className="text-xs font-bold text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-2.5 py-1.5 rounded transition-colors cursor-pointer">
+                                <button onClick={() => { if (window.confirm(`Are you sure you want to deactivate "${pred.forwardLabel}"?`)) handleDeactivateEmpty(pred.id); }} disabled={isPending} className="text-xs font-bold text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-3 py-1.5 rounded transition-colors cursor-pointer">
                                   Deactivate
                                 </button>
                               ) : (
-                                <button onClick={() => { setMigratingId(isMigrating ? null : pred.id); setEditingId(null); }} disabled={isPending} className="text-xs font-bold text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-2.5 py-1.5 rounded transition-colors cursor-pointer">
+                                <button onClick={() => { setMigratingId(isMigrating ? null : pred.id); setEditingId(null); }} disabled={isPending} className="text-xs font-bold text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-3 py-1.5 rounded transition-colors cursor-pointer">
                                   {isMigrating ? "Cancel" : "Deactivate"}
                                 </button>
                               )}
@@ -369,9 +387,9 @@ export default function PredicateDictionaryClient({
 
                       {/* Display Restrictions Summary on Active State */}
                       {!pred.isSystem && (pred.sourceLayers || pred.targetLayers) && (
-                        <div className="text-[11px] text-gray-500 dark:text-zinc-400 bg-gray-50 dark:bg-zinc-800/50 px-3 py-2 rounded border border-gray-100 dark:border-zinc-700 w-fit transition-colors">
+                        <div className="text-[11px] text-gray-500 dark:text-zinc-400 bg-gray-50 dark:bg-zinc-800/50 px-3 py-2 rounded-md border border-gray-100 dark:border-zinc-700/50 w-fit transition-colors">
                           {getLayerSummaryText(pred.sourceLayers || ['IDENTITY', 'PHYSICAL', 'MEDIA'], pred.sourceDefaultKind)}
-                          <span className="mx-1.5 opacity-50">→</span>
+                          <span className="mx-2 opacity-50 text-gray-400">→</span>
                           {getLayerSummaryText(pred.isSymmetric ? (pred.sourceLayers || ['IDENTITY', 'PHYSICAL', 'MEDIA']) : (pred.targetLayers || ['IDENTITY', 'PHYSICAL', 'MEDIA']), pred.isSymmetric ? pred.sourceDefaultKind : pred.targetDefaultKind)}
                         </div>
                       )}
@@ -380,20 +398,20 @@ export default function PredicateDictionaryClient({
 
                   {/* Safety Migration Flow */}
                   {isMigrating && (
-                    <div className="mt-4 pt-4 border-t border-red-100 dark:border-red-900/30 bg-red-50/50 dark:bg-red-900/10 -mx-4 -mb-4 p-4 rounded-b-lg animate-in slide-in-from-top-2 transition-colors">
+                    <div className="mt-4 pt-4 border-t border-red-100 dark:border-red-900/30 bg-red-50/50 dark:bg-red-900/10 -mx-5 -mb-5 p-5 rounded-b-xl animate-in slide-in-from-top-2 transition-colors">
                       <p className="text-xs text-red-800 dark:text-red-400 font-medium mb-3 flex items-center gap-1.5">
                         <span>⚠️</span>
                         To deactivate "{pred.forwardLabel}", you must select a fallback connection for its {count} existing {count === 1 ? 'edge' : 'edges'}.
                       </p>
                       
                       <div className="flex gap-2 flex-col sm:flex-row">
-                        <select value={targetId} onChange={(e) => setTargetId(e.target.value)} className="flex-1 p-2 text-sm border border-red-200 dark:border-red-800/50 bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 rounded focus:ring-2 focus:ring-red-500 outline-none transition-colors">
+                        <select value={targetId} onChange={(e) => setTargetId(e.target.value)} className="flex-1 p-2.5 text-sm border border-red-200 dark:border-red-800/50 bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 rounded-md focus:ring-2 focus:ring-red-500 outline-none transition-colors shadow-sm">
                           <option value="">Select fallback connection...</option>
                           {activePredicates.filter(p => p.id !== pred.id && !p.isSystem).map(p => (
                             <option key={p.id} value={p.id}>{p.forwardLabel}</option>
                           ))}
                         </select>
-                        <button onClick={() => handleMigrate(pred.id)} disabled={isPending || !targetId} className="px-4 py-2 bg-red-600 dark:bg-red-500 text-white text-sm font-medium rounded hover:bg-red-700 dark:hover:bg-red-600 disabled:opacity-50 cursor-pointer shadow-sm transition-colors">
+                        <button onClick={() => handleMigrate(pred.id)} disabled={isPending || !targetId} className="px-5 py-2.5 bg-red-600 dark:bg-red-500 text-white text-xs font-bold uppercase tracking-widest rounded-md hover:bg-red-700 dark:hover:bg-red-600 disabled:opacity-50 cursor-pointer shadow-sm transition-colors">
                           {isPending ? "Migrating..." : "Migrate & Deactivate"}
                         </button>
                       </div>
@@ -411,9 +429,9 @@ export default function PredicateDictionaryClient({
              <h2 className="text-sm font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest mb-4">
               Deprecated Connections
             </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 opacity-60">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 opacity-60">
               {inactivePredicates.map(pred => (
-                <div key={pred.id} className="bg-gray-50 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-800 rounded p-3 flex flex-col gap-1 grayscale transition-colors">
+                <div key={pred.id} className="bg-gray-50 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-800 rounded-lg p-4 flex flex-col gap-1 grayscale transition-colors">
                   <span className="text-sm font-medium text-gray-500 dark:text-zinc-500 line-through">{pred.forwardLabel}</span>
                   {!pred.isSymmetric && (
                     <span className="text-xs text-gray-400 dark:text-zinc-600 line-through">/ {pred.reverseLabel}</span>

@@ -18,7 +18,7 @@ export default async function DictionaryPage() {
   }, {} as Record<string, number>);
 
   return (
-    <div className="max-w-4xl mx-auto p-8 md:p-12 pb-32">
+    <div className="max-w-6xl mx-auto p-8 md:p-12 pb-32">
       <div className="mb-8">
         <a href="/" className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline mb-4 inline-block transition-colors">
           ← Back to Workspace
