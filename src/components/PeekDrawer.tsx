@@ -49,7 +49,9 @@ export default function PeekDrawer({
   const focusHref = `/?node=${peekNode.id}`;
 
   const { isImage, isVideo, isAudio, isYouTube, isWebLink, ytId } = mediaDetails;
-  const propsToDisplay = Object.entries(peekProps).filter(([k]) => k !== 'fileUrl' && k !== 'mimeType' && k !== 'temporal_input' && k !== 'hash');
+  
+  // Exclude 'notes' so it doesn't get rendered twice in the properties block!
+  const propsToDisplay = Object.entries(peekProps).filter(([k]) => k !== 'fileUrl' && k !== 'mimeType' && k !== 'temporal_input' && k !== 'hash' && k !== 'notes');
   const isTombstone = peekNode.isActive === false;
 
   // --------------------------------------------------------------------------
@@ -94,7 +96,7 @@ export default function PeekDrawer({
          )}
       </div>
       {peekProps.notes && (
-        <div className="text-sm text-gray-600 dark:text-zinc-400 leading-relaxed bg-gray-50 dark:bg-zinc-900/50 p-3 rounded-lg border border-gray-100 dark:border-zinc-800/50 shadow-inner">
+        <div className="text-gray-600 dark:text-zinc-400 text-sm line-clamp-1 hover:line-clamp-none cursor-pointer mt-0.5 transition-all" title="Click to expand full notes">
           {peekProps.notes}
         </div>
       )}

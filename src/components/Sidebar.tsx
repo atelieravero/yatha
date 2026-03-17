@@ -79,10 +79,8 @@ export default function Sidebar({
     });
   }, [searchQuery]);
 
-  // --- Universal Creation State (Track 1 & 2) ---
-  // (Bifurcated Entry Model)
-  const [isMinting, setIsMinting] = useState(false);
-  const [mintMode, setMintMode] = useState<'IDENTITY' | 'PHYSICAL' | 'MEDIA'>('IDENTITY');
+  // --- Universal 4-Gateway State ---
+  const [activeGateway, setActiveGateway] = useState<'IDENTITY' | 'PHYSICAL' | 'FILE' | 'URL' | null>(null);
   const [mintLabel, setMintLabel] = useState("");
   const [mintKind, setMintKind] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -92,7 +90,7 @@ export default function Sidebar({
   const [isPending, startTransition] = useTransition();
 
   const handleCloseMinting = () => {
-    setIsMinting(false);
+    setActiveGateway(null);
     setMintLabel("");
     setMintKind("");
     setFile(null);
@@ -102,20 +100,20 @@ export default function Sidebar({
   };
 
   const executeGlobalMint = async () => {
-    if (mintMode === 'IDENTITY' || mintMode === 'PHYSICAL') {
+    if (activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') {
       if (!mintLabel.trim()) return;
       startTransition(async () => {
-         const exactMatch = await getExactMatchNode(mintLabel.trim(), mintMode);
+         const exactMatch = await getExactMatchNode(mintLabel.trim(), activeGateway);
          if (exactMatch) {
            setDuplicateFound(exactMatch as Node);
            return;
          }
-         const newId = await createNode(mintLabel.trim(), mintMode, mintMode === 'IDENTITY' ? mintKind : null);
+         const newId = await createNode(mintLabel.trim(), activeGateway, activeGateway === 'IDENTITY' ? mintKind : null);
          handleCloseMinting();
          router.push(`/?node=${newId}`);
          setIsMobileMenuOpen(false);
       });
-    } else if (mintMode === 'MEDIA') {
+    } else if (activeGateway === 'FILE') {
       startTransition(async () => {
          if (file) {
            const buffer = await file.arrayBuffer();
@@ -125,16 +123,20 @@ export default function Sidebar({
            const existing = await checkDuplicateArtifact(hex);
            if (existing) { setDuplicateFound(existing as Node); return; }
 
-           const newId = await createNode(file.name, "MEDIA", null);
+           const newId = await createNode(mintLabel.trim() || file.name, "MEDIA", null);
            const { uploadUrl, fileUrl } = await getUploadTicket(file.name, file.type);
-           if (uploadUrl !== 'mock') {
+           if (uploadUrl && uploadUrl !== 'mock') {
               await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
            }
            await attachFileToNode(newId, fileUrl, file.type, file.size, hex);
            handleCloseMinting();
            router.push(`/?node=${newId}`);
            setIsMobileMenuOpen(false);
-         } else if (linkUrl) {
+         }
+      });
+    } else if (activeGateway === 'URL') {
+      startTransition(async () => {
+         if (linkUrl) {
            let hash = linkUrl.trim();
            const ytMatch = hash.match(/(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
            if (ytMatch && ytMatch[1]) hash = `youtube:${ytMatch[1]}`;
@@ -142,7 +144,7 @@ export default function Sidebar({
            const existing = await checkDuplicateArtifact(hash);
            if (existing) { setDuplicateFound(existing as Node); return; }
 
-           const newId = await createNode(linkUrl.trim(), "MEDIA", null);
+           const newId = await createNode(mintLabel.trim() || linkUrl.trim(), "MEDIA", null);
            await attachFileToNode(newId, hash.startsWith('youtube:') ? '' : linkUrl.trim(), 'text/html', 0, hash);
            handleCloseMinting();
            router.push(`/?node=${newId}`);
@@ -173,12 +175,11 @@ export default function Sidebar({
     if (layerNodes.length === 0) return null;
     return (
       <div className="mb-6">
-        <h3 className="px-2 text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest mb-2 sticky top-0 bg-white dark:bg-zinc-900 py-1 z-10 transition-colors">
+        <h3 className="px-4 py-2 text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-widest mb-1 sticky top-0 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md z-10 border-b border-gray-100 dark:border-zinc-800/50 shadow-sm transition-colors">
           {title}
         </h3>
-        <div className="space-y-0.5">
+        <div className="space-y-0.5 px-2">
           {layerNodes.map(node => {
-            // Extracted logic simplifies the component!
             const { icon } = getNodeDisplay(node, activeKinds);
             const isActive = activeNodeId === node.id;
             const isTombstone = node.isActive === false;
@@ -273,79 +274,81 @@ export default function Sidebar({
           </div>
         </div>
 
-        {/* ENTRY GATEWAYS (Track 1 & Track 2) */}
-        {canWrite && !searchQuery.trim() && (
+        {/* ENTRY GATEWAYS (4-Gateway System) */}
+        {canWrite && !searchQuery.trim() && !activeGateway && (
           <div className="px-4 py-3 border-b border-gray-200 dark:border-zinc-800 bg-gray-50/30 dark:bg-zinc-900/30 transition-colors">
-            <div className="flex gap-2">
-              <button 
-                onClick={() => { setIsMinting(true); setMintMode('IDENTITY'); }}
-                className="flex-1 py-1.5 px-2 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-md text-[10px] font-bold uppercase tracking-widest text-gray-700 dark:text-zinc-300 hover:border-blue-300 dark:hover:border-blue-700 hover:text-blue-600 dark:hover:text-blue-400 shadow-sm transition-colors cursor-pointer flex justify-center items-center gap-1.5"
-              >
-                <span>✨</span> Concept
+            <label className="block text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-widest mb-2">Create Record</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => setActiveGateway('IDENTITY')} className="p-2 border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 rounded-md hover:border-blue-300 dark:hover:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left transition-colors cursor-pointer shadow-sm flex items-center gap-2">
+                <span className="text-lg">🟣</span>
+                <span className="font-bold text-[10px] uppercase tracking-widest text-gray-700 dark:text-zinc-300">Concept</span>
               </button>
-              <button 
-                onClick={() => { setIsMinting(true); setMintMode('MEDIA'); }}
-                className="flex-1 py-1.5 px-2 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-md text-[10px] font-bold uppercase tracking-widest text-gray-700 dark:text-zinc-300 hover:border-emerald-300 dark:hover:border-emerald-700 hover:text-emerald-600 dark:hover:text-emerald-400 shadow-sm transition-colors cursor-pointer flex justify-center items-center gap-1.5"
-              >
-                <span>☁️</span> Upload
+              <button onClick={() => setActiveGateway('PHYSICAL')} className="p-2 border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 rounded-md hover:border-amber-300 dark:hover:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-900/20 text-left transition-colors cursor-pointer shadow-sm flex items-center gap-2">
+                <span className="text-lg">📦</span>
+                <span className="font-bold text-[10px] uppercase tracking-widest text-gray-700 dark:text-zinc-300">Physical</span>
+              </button>
+              <button onClick={() => setActiveGateway('FILE')} className="p-2 border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 rounded-md hover:border-emerald-300 dark:hover:border-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-left transition-colors cursor-pointer shadow-sm flex items-center gap-2">
+                <span className="text-lg">📄</span>
+                <span className="font-bold text-[10px] uppercase tracking-widest text-gray-700 dark:text-zinc-300">File</span>
+              </button>
+              <button onClick={() => setActiveGateway('URL')} className="p-2 border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 rounded-md hover:border-blue-300 dark:hover:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left transition-colors cursor-pointer shadow-sm flex items-center gap-2">
+                <span className="text-lg">🔗</span>
+                <span className="font-bold text-[10px] uppercase tracking-widest text-gray-700 dark:text-zinc-300">Link</span>
               </button>
             </div>
           </div>
         )}
 
         {/* MINTING PANEL */}
-        {isMinting && (
+        {activeGateway && (
           <div className="p-4 border-b border-gray-200 dark:border-zinc-800 bg-blue-50/50 dark:bg-blue-900/10 animate-in slide-in-from-top-2 transition-colors">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold uppercase tracking-widest text-blue-800 dark:text-blue-400 flex items-center gap-1.5">
-                {mintMode === 'MEDIA' ? '☁️ Upload Media' : '✨ Mint Record'}
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-blue-800 dark:text-blue-400 flex items-center gap-1.5">
+                {activeGateway === 'FILE' ? '📄 Upload File' : activeGateway === 'URL' ? '🔗 Add Web Link' : activeGateway === 'PHYSICAL' ? '📦 Mint Physical Item' : '🟣 Mint Concept'}
               </span>
               <button onClick={handleCloseMinting} className="text-gray-400 hover:text-gray-800 dark:hover:text-zinc-200 cursor-pointer">✕</button>
             </div>
-            
-            {/* Mode Toggles if not Media */}
-            {mintMode !== 'MEDIA' && (
-              <div className="flex gap-1 mb-3 bg-white dark:bg-zinc-900 p-1 rounded-md border border-gray-200 dark:border-zinc-700 transition-colors">
-                <button onClick={() => setMintMode('IDENTITY')} className={`flex-1 py-1 text-[10px] font-bold uppercase tracking-widest rounded transition-colors cursor-pointer ${mintMode === 'IDENTITY' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300' : 'text-gray-500 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-800'}`}>Identity</button>
-                <button onClick={() => setMintMode('PHYSICAL')} className={`flex-1 py-1 text-[10px] font-bold uppercase tracking-widest rounded transition-colors cursor-pointer ${mintMode === 'PHYSICAL' ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300' : 'text-gray-500 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-800'}`}>Physical</button>
-              </div>
-            )}
 
             <div className="space-y-3">
-              {(mintMode === 'IDENTITY' || mintMode === 'PHYSICAL') && (
+              {(activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
                 <>
                   <input 
                     type="text" autoFocus placeholder="Name / Label..." value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isPending}
-                    className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors"
+                    className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors"
                   />
-                  {mintMode === 'IDENTITY' && (
-                    <select value={mintKind} onChange={e => setMintKind(e.target.value)} disabled={isPending} className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors">
-                      <option value="">Select Kind...</option>
+                  {activeGateway === 'IDENTITY' && (
+                    <select value={mintKind} onChange={e => setMintKind(e.target.value)} disabled={isPending} className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors">
+                      <option value="">Select Classification...</option>
                       {activeKinds.map(k => <option key={k.id} value={k.id}>{k.icon} {k.label}</option>)}
                     </select>
                   )}
                 </>
               )}
 
-              {mintMode === 'MEDIA' && (
+              {activeGateway === 'FILE' && (
                 <div className="space-y-3">
-                  <input 
-                    type="file" id="sidebar-file" className="hidden" onChange={e => e.target.files?.[0] && setFile(e.target.files[0])}
-                  />
+                  <input type="file" id="sidebar-file" className="hidden" onChange={e => e.target.files?.[0] && setFile(e.target.files[0])} />
                   <label htmlFor="sidebar-file" className={`block p-4 border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors ${file ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-gray-50 dark:hover:bg-zinc-800'}`}>
-                     <span className="block text-xl mb-1">{file ? '✅' : '📄'}</span>
-                     <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-zinc-400">{file ? file.name : 'Select File'}</span>
+                     <span className="block text-2xl mb-1">{file ? '✅' : '📄'}</span>
+                     <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 dark:text-zinc-400">{file ? file.name : 'Select File'}</span>
                   </label>
-                  <div className="text-center text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase">OR PASTE URL</div>
-                  <input 
-                    type="url" placeholder="https://..." value={linkUrl} onChange={e => setLinkUrl(e.target.value)} disabled={isPending || !!file}
-                    className="w-full p-2 text-sm border border-gray-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors"
-                  />
+                  {file && (
+                     <input type="text" autoFocus placeholder="Artifact Title..." value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isPending} className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors" />
+                  )}
+                </div>
+              )}
+
+              {activeGateway === 'URL' && (
+                <div className="space-y-3">
+                  <input type="url" autoFocus placeholder="https://..." value={linkUrl} onChange={e => setLinkUrl(e.target.value)} disabled={isPending} className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors" />
+                  {linkUrl && (
+                     <input type="text" placeholder="Artifact Title (Optional)..." value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isPending} className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors" />
+                  )}
                 </div>
               )}
 
               {duplicateFound && (
-                <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded text-xs text-amber-800 dark:text-amber-400 shadow-sm transition-colors">
+                <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-md text-xs text-amber-800 dark:text-amber-400 shadow-sm transition-colors">
                   <strong>⚠️ Exact Match Found:</strong> "{duplicateFound.label}" already exists.
                   {duplicateFound.isActive === false && " (Currently in Trash)."}
                   <div className="mt-2 flex gap-2">
@@ -361,10 +364,10 @@ export default function Sidebar({
               {!duplicateFound && (
                 <button 
                   onClick={executeGlobalMint} 
-                  disabled={isPending || (mintMode === 'IDENTITY' && (!mintLabel || !mintKind)) || (mintMode === 'PHYSICAL' && !mintLabel) || (mintMode === 'MEDIA' && !file && !linkUrl)}
-                  className="w-full py-2 bg-blue-600 dark:bg-blue-500 text-white text-xs font-bold uppercase tracking-widest rounded hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 shadow-sm transition-colors cursor-pointer"
+                  disabled={isPending || (activeGateway === 'IDENTITY' && (!mintLabel || !mintKind)) || (activeGateway === 'PHYSICAL' && !mintLabel) || (activeGateway === 'FILE' && !file) || (activeGateway === 'URL' && !linkUrl)}
+                  className="w-full py-2 bg-blue-600 dark:bg-blue-500 text-white text-xs font-bold uppercase tracking-widest rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 shadow-sm transition-colors cursor-pointer"
                 >
-                  {isPending ? "Processing..." : mintMode === 'MEDIA' ? "Upload & Mint" : "Mint Record"}
+                  {isPending ? "Processing..." : activeGateway === 'FILE' || activeGateway === 'URL' ? "Upload & Mint" : "Mint Record"}
                 </button>
               )}
             </div>
@@ -372,7 +375,7 @@ export default function Sidebar({
         )}
 
         {/* DIRECTORY LISTING */}
-        <div className="p-4 flex-1 overflow-y-auto bg-white dark:bg-zinc-900 transition-colors">
+        <div className="flex-1 overflow-y-auto bg-white dark:bg-zinc-900 transition-colors py-2">
           {searchQuery.trim() && displayNodes.length === 0 ? (
             <div className="text-center p-4 text-gray-500 dark:text-zinc-400 text-sm italic">
               No records found for "{searchQuery}".
