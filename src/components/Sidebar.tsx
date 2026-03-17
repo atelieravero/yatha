@@ -495,19 +495,19 @@ export default function Sidebar({
                </div>
             </div>
             
-            <div className="flex items-center">
+            <div className="flex items-center gap-1">
               {user.role === 'SUPERUSER' && (
                 <>
                   <Link 
                     href="/dictionary" 
-                    className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer px-2"
+                    className="text-base text-gray-400 dark:text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer p-1 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded-md"
                     title="Taxonomy Dictionary"
                   >
                     📖
                   </Link>
                   <Link 
                     href="/admin" 
-                    className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer px-2"
+                    className="text-base text-gray-400 dark:text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer p-1 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded-md"
                     title="Admin Settings"
                   >
                     ⚙️
@@ -516,10 +516,10 @@ export default function Sidebar({
               )}
               <button 
                 onClick={() => signOut()} 
-                className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 hover:text-red-500 dark:hover:text-red-400 transition-colors uppercase tracking-widest cursor-pointer px-2"
+                className="text-base text-gray-400 dark:text-zinc-500 hover:text-red-500 dark:hover:text-red-400 transition-colors cursor-pointer p-1 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md"
                 title="Sign Out"
               >
-                Exit
+                🚪
               </button>
             </div>
           </div>
