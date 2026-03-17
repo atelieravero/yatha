@@ -744,8 +744,32 @@ export default function UniversalBuilder({
           <div className="animate-in slide-in-from-right-2 p-4 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-md shadow-sm transition-colors">
              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                 <div>
-                  <label className="block text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase mb-1">Temporal Bounds (Optional)</label>
-                  <input type="text" placeholder="e.g. 1995~1998" value={temporalInput} onChange={(e) => setTemporalInput(e.target.value)} className="w-full p-2 text-xs border border-gray-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors" />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase">Temporal Bounds</label>
+                    <label className="flex items-center gap-1.5 cursor-pointer" title="Mark this relationship as timeless (e.g. Influence)">
+                      <span className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase">Timeless</span>
+                      <div className="relative inline-flex items-center">
+                        <input 
+                          type="checkbox" 
+                          checked={temporalInput === 'TIMELESS'}
+                          onChange={(e) => {
+                            if (e.target.checked) setTemporalInput('TIMELESS');
+                            else setTemporalInput('');
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-7 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-zinc-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                      </div>
+                    </label>
+                  </div>
+                  <input 
+                    type="text" 
+                    placeholder={temporalInput === 'TIMELESS' ? 'Timeless Relationship' : 'e.g. 1995~1998'} 
+                    value={temporalInput === 'TIMELESS' ? '' : temporalInput} 
+                    onChange={(e) => setTemporalInput(e.target.value)} 
+                    disabled={temporalInput === 'TIMELESS'}
+                    className={`w-full p-2 text-xs border border-gray-200 dark:border-zinc-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors ${temporalInput === 'TIMELESS' ? 'bg-gray-100 dark:bg-zinc-800/50 cursor-not-allowed placeholder-gray-400 dark:placeholder-zinc-500' : 'bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100'}`} 
+                  />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase mb-1">Locator / Position (Optional)</label>

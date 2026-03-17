@@ -6,6 +6,13 @@ import EdgeRetractButton from "@/components/EdgeRetractButton";
 import { parseFuzzyTemporal } from "@/lib/dateParser";
 import { updateEdgeProperties } from "@/app/actions";
 
+// Helper for formatting the inferred bounds ghost badge
+const formatInferredYear = (date?: Date | string | null) => {
+  if (!date) return 'Open';
+  const d = new Date(date);
+  return isNaN(d.getTime()) ? 'Open' : d.getUTCFullYear();
+};
+
 export default function EdgeRow({
   edge,
   node,
@@ -16,7 +23,10 @@ export default function EdgeRow({
   activeKinds,
   hideBadge = false,
   hideEdit = false, // Prevents editing properties on raw structural edges like CARRIES
-  canWrite = true
+  canWrite = true,
+  effectiveStart,
+  effectiveEnd,
+  inferredBounds
 }: {
   edge: any;
   node: any;
@@ -28,6 +38,9 @@ export default function EdgeRow({
   hideBadge?: boolean;
   hideEdit?: boolean;
   canWrite?: boolean;
+  effectiveStart?: Date | string | null;
+  effectiveEnd?: Date | string | null;
+  inferredBounds?: boolean;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   
@@ -65,7 +78,7 @@ export default function EdgeRow({
   }
 
   useEffect(() => {
-    if (isEditing && temporalInput !== undefined) {
+    if (isEditing && temporalInput !== undefined && temporalInput !== 'TIMELESS') {
       const parsed = parseFuzzyTemporal(temporalInput);
       setLiveBounds({ start: parsed.notEarlierThan, end: parsed.notLaterThan });
     }
@@ -92,16 +105,33 @@ export default function EdgeRow({
         
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Temporal Bounds</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">Temporal Bounds</label>
+              <label className="flex items-center gap-1.5 cursor-pointer" title="Mark this relationship as timeless (e.g. Influence)">
+                <span className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase">Timeless</span>
+                <div className="relative inline-flex items-center">
+                  <input 
+                    type="checkbox" 
+                    checked={temporalInput === 'TIMELESS'}
+                    onChange={(e) => {
+                      if (e.target.checked) setTemporalInput('TIMELESS');
+                      else setTemporalInput('');
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-7 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-zinc-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                </div>
+              </label>
+            </div>
             <input
               type="text"
-              value={temporalInput}
+              value={temporalInput === 'TIMELESS' ? '' : temporalInput}
               onChange={e => setTemporalInput(e.target.value)}
-              disabled={isPending}
-              placeholder="e.g. 1995~1998"
-              className="w-full p-2 text-xs border border-gray-200 dark:border-gray-700 rounded bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
+              disabled={isPending || temporalInput === 'TIMELESS'}
+              placeholder={temporalInput === 'TIMELESS' ? 'Timeless Relationship' : 'e.g. 1995~1998'}
+              className={`w-full p-2 text-xs border border-gray-200 dark:border-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-colors ${temporalInput === 'TIMELESS' ? 'bg-gray-100 dark:bg-zinc-800/50 cursor-not-allowed placeholder-gray-400 dark:placeholder-zinc-500' : 'bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100'}`}
             />
-            {(temporalInput || liveBounds.start || liveBounds.end) && (
+            {temporalInput !== 'TIMELESS' && (temporalInput || liveBounds.start || liveBounds.end) && (
               <div className="mt-2 bg-emerald-50/50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/30 p-2.5 rounded-md w-fit">
                 <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-400 uppercase tracking-widest block mb-1">
                   ↳ System Boundaries:
@@ -147,7 +177,7 @@ export default function EdgeRow({
           </span>
         )}
         
-        {/* CHANGED: Now uses Next.js Link to soft-update the URL, and opens the target in the Peek Drawer instead of hard-navigating! */}
+        {/* Next.js Link to soft-update the URL, opening the target in the Peek Drawer instead of hard-navigating! */}
         <Link 
           scroll={false} 
           href={`/?node=${activeNodeId}&tab=${currentTab}&peek=${node.id}`} 
@@ -169,11 +199,26 @@ export default function EdgeRow({
           </span>
         )}
         
-        {edge.temporalInput && (
-          <span className="text-[10px] font-mono bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 px-1.5 py-0.5 rounded border border-gray-200 dark:border-zinc-700" title="Relationship Temporal Bounds">
+        {edge.temporalInput === 'TIMELESS' ? (
+          <span className="text-[10px] font-bold uppercase tracking-widest bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 px-1.5 py-0.5 rounded border border-gray-200 dark:border-zinc-700 transition-colors" title="Timeless Relationship">
+            ⏱ Timeless
+          </span>
+        ) : edge.temporalInput ? (
+          <span className="text-[10px] font-mono bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 px-1.5 py-0.5 rounded border border-gray-200 dark:border-zinc-700 transition-colors" title="Relationship Temporal Bounds">
             ⏱ {edge.temporalInput}
           </span>
-        )}
+        ) : inferredBounds ? (
+          <span 
+            onClick={(e) => {
+              e.preventDefault();
+              if (canWrite && !hideEdit && !isTargetDead) setIsEditing(true);
+            }}
+            className={`text-[10px] font-mono bg-transparent text-gray-400 dark:text-zinc-500 px-1.5 py-0.5 rounded border border-dashed border-gray-300 dark:border-zinc-700 transition-colors ${canWrite && !hideEdit && !isTargetDead ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-zinc-800/50 hover:text-gray-600 dark:hover:text-zinc-300' : ''}`} 
+            title="Calculated from node lifespans. Click to define explicit bounds."
+          >
+            ⏱ [Inferred: {formatInferredYear(effectiveStart)} → {formatInferredYear(effectiveEnd)}]
+          </span>
+        ) : null}
         
         <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pl-2">
             {canWrite && !hideEdit && !isTargetDead && (

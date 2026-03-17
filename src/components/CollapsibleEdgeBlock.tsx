@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import UniversalBuilder from "./UniversalBuilder";
 import EdgeRow from "./EdgeRow";
+import { sortEdgeGroup } from "@/lib/edgeGrouping";
 
 interface CollapsibleEdgeBlockProps {
   title: string;
   icon?: string;
-  items: any[]; // Expects array of { edge, node, isSource }
+  items: any[]; // Expects array of { edge, node, isSource, effectiveStart, effectiveEnd, inferredBounds }
   builderConfig?: any; // The config object for the UniversalBuilder
   defaultOpen?: boolean;
   
@@ -43,8 +44,29 @@ export default function CollapsibleEdgeBlock({
   // Auto-collapse if empty, regardless of defaultOpen prop
   const [isOpen, setIsOpen] = useState(defaultOpen && count > 0);
 
+  // Sorting State & Memory
+  const [isMounted, setIsMounted] = useState(false);
+  const [sortMode, setSortMode] = useState<'ASC' | 'DESC' | 'RECENT'>('RECENT');
+  const storageKey = `yatha_sort_${activeNodeId}_${title}`;
+
+  useEffect(() => {
+    setIsMounted(true);
+    const savedSort = localStorage.getItem(storageKey) as 'ASC' | 'DESC' | 'RECENT' | null;
+    if (savedSort) {
+      setSortMode(savedSort);
+    }
+  }, [storageKey]);
+
+  const handleSortChange = (newMode: 'ASC' | 'DESC' | 'RECENT') => {
+    setSortMode(newMode);
+    localStorage.setItem(storageKey, newMode);
+  };
+
   // Don't render the block at all if it has no data AND no builder configuration
   if (count === 0 && !builderConfig) return null;
+
+  // Apply sorting dynamically (wait for mount to prevent hydration mismatch with localStorage)
+  const displayItems = isMounted ? sortEdgeGroup(items, sortMode, allPredicates) : sortEdgeGroup(items, 'RECENT', allPredicates);
 
   return (
     <div className="border border-gray-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900 overflow-hidden mb-4 shadow-sm transition-colors">
@@ -81,11 +103,26 @@ export default function CollapsibleEdgeBlock({
           )}
         </div>
         
-        {/* 2. The Action Bar (Universal Builder) */}
+        {/* 2. The Action Bar (Universal Builder & Sorting) */}
         <div 
-          className="flex items-center gap-2" 
-          onClick={(e) => e.stopPropagation()} // Prevents clicking the "+" button from collapsing the block
+          className="flex items-center gap-3" 
+          onClick={(e) => e.stopPropagation()} // Prevents clicking inside action bar from collapsing the block
         >
+          {/* Sorting Dropdown */}
+          {count > 1 && (
+            <select
+              value={sortMode}
+              onChange={(e) => handleSortChange(e.target.value as any)}
+              className="text-[10px] font-bold uppercase tracking-widest bg-transparent text-gray-400 dark:text-zinc-500 hover:text-gray-800 dark:hover:text-zinc-300 cursor-pointer outline-none transition-colors appearance-none text-right"
+              title="Sort this block"
+            >
+              <option value="RECENT">Sort: Recent</option>
+              <option value="ASC">Sort: Oldest</option>
+              <option value="DESC">Sort: Newest</option>
+            </select>
+          )}
+
+          {/* Add Record Button */}
           {builderConfig && sourceNode && (
             <UniversalBuilder 
               config={builderConfig}
@@ -101,7 +138,7 @@ export default function CollapsibleEdgeBlock({
       {/* 3. The Body (Edge Rows) */}
       {isOpen && count > 0 && (
         <div className="p-3 flex flex-col gap-2 border-t border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-          {items.map((item, idx) => {
+          {displayItems.map((item, idx) => {
             // Destructure the composite object from the database query
             const edge = item.edge || item;
             const node = item.node || {};
