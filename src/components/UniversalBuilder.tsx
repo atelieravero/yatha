@@ -4,6 +4,7 @@ import { useState, useTransition, useEffect } from "react";
 import { assertEdge, createNode, getUploadTicket, attachFileToNode, checkDuplicateArtifact, createPredicate, getExactMatchNode, restoreNode } from "@/app/actions";
 import { SYSTEM_PREDICATES } from "@/db/schema";
 import { getInferredHint } from "@/lib/dateParser";
+import { getNodeDisplay } from "@/lib/nodeUtils";
 
 type MinimalNode = { 
   id: string; 
@@ -11,6 +12,7 @@ type MinimalNode = {
   layer: "IDENTITY" | "PHYSICAL" | "MEDIA"; 
   kind?: string | null; 
   aliases?: string[]; 
+  properties?: Record<string, any>;
   isActive?: boolean;
   notEarlierThan?: string | Date | null;
   notLaterThan?: string | Date | null;
@@ -226,12 +228,6 @@ export default function UniversalBuilder({
         n.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (n.aliases && n.aliases.some(alias => alias.toLowerCase().includes(searchTerm.toLowerCase())))
       ).slice(0, 20);
-
-  const getIcon = (n: MinimalNode) => {
-    if (n.layer === 'PHYSICAL') return '📦';
-    if (n.layer === 'MEDIA') return '🖼️';
-    return activeKinds.find(k => k.id === n.kind)?.icon || '🟣';
-  };
 
   // --------------------------------------------------------------------------
   // WORKFLOW HANDLERS
@@ -611,7 +607,7 @@ export default function UniversalBuilder({
                                 key={n.id} onClick={() => handleSelectExisting(n.id)}
                                 className="flex items-center gap-3 px-3 py-2 text-left text-sm transition-colors border-b border-gray-50 dark:border-zinc-800 last:border-0 hover:bg-gray-50 dark:hover:bg-zinc-800 text-gray-700 dark:text-zinc-300 cursor-pointer"
                               >
-                                <span className="opacity-80 text-lg leading-none">{getIcon(n)}</span>
+                                <span className="opacity-80 text-lg leading-none">{getNodeDisplay(n, activeKinds).icon}</span>
                                 <div className="flex flex-col min-w-0 flex-1">
                                   <span className="truncate">
                                     {n.label}
@@ -619,7 +615,7 @@ export default function UniversalBuilder({
                                       <span className="text-gray-400 dark:text-zinc-500 font-normal ml-1.5 text-xs truncate">({n.aliases.join(', ')})</span>
                                     )}
                                   </span>
-                                  <span className="text-[9px] text-gray-400 dark:text-zinc-500 font-mono tracking-tighter uppercase truncate">{n.layer}</span>
+                                  <span className="text-[9px] text-gray-400 dark:text-zinc-500 font-mono tracking-tighter uppercase truncate">{getNodeDisplay(n, activeKinds).kindLabel}</span>
                                 </div>
                               </button>
                             ))}

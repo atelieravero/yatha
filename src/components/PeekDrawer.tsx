@@ -5,6 +5,7 @@ import { getQuickContext } from "@/app/actions";
 import { getMediaDetails } from "@/lib/mediaUtils";
 import CollapsibleEdgeBlock from "./CollapsibleEdgeBlock";
 import { groupEdges } from "@/lib/edgeGrouping";
+import { getNodeDisplay } from "@/lib/nodeUtils";
 
 export default function PeekDrawer({
   peekNode,
@@ -28,7 +29,6 @@ export default function PeekDrawer({
   useEffect(() => {
     if (peekNode) {
       setIsLoading(true);
-      // NOTE: Expects getQuickContext to return { edges, relatedNodes }
       getQuickContext(peekNode.id).then((data: any) => {
         setContextData(data);
         setIsLoading(false);
@@ -39,27 +39,11 @@ export default function PeekDrawer({
   if (!peekNode) return null;
 
   // --------------------------------------------------------------------------
-  // 3-LAYER ICON & LABEL ROUTING 
+  // 3-LAYER ICON & LABEL ROUTING (Extracted to DRY Utility)
   // --------------------------------------------------------------------------
-  let icon = '🟣';
-  let label = 'Concept';
-
   const peekProps = (peekNode?.properties as Record<string, any>) || {};
   const mediaDetails = getMediaDetails(peekProps);
-
-  if (peekNode.layer === 'PHYSICAL') {
-    icon = '📦';
-    label = 'Physical Item';
-  } else if (peekNode.layer === 'MEDIA') {
-    icon = mediaDetails.icon;
-    label = mediaDetails.format;
-  } else {
-    const kindDef = activeKinds.find((k: any) => k.id === peekNode.kind);
-    if (kindDef) {
-      icon = kindDef.icon;
-      label = kindDef.label;
-    }
-  }
+  const { icon, kindLabel: label } = getNodeDisplay(peekNode, activeKinds);
 
   const closeHref = `/?node=${activeNodeId}${currentTab ? `&tab=${currentTab}` : ''}`;
   const focusHref = `/?node=${peekNode.id}`;
@@ -97,7 +81,7 @@ export default function PeekDrawer({
            <span className="italic text-gray-400 dark:text-zinc-500 text-xs">No intrinsic properties defined.</span>
          ) : (
            <>
-             {peekProps.temporal_input && <span className="font-semibold text-gray-900 dark:text-zinc-100">{peekProps.temporal_input}</span>}
+             {peekProps.temporal_input && <span className="font-semibold text-gray-900 dark:text-zinc-100">{peekProps.temporal_input === 'TIMELESS' ? 'Timeless' : peekProps.temporal_input}</span>}
              {propsToDisplay.map(([key, val]) => {
                const isSystem = key === 'hash' || key === 'url' || key === 'youtube_id' || key === 'fileSize';
                return (

@@ -123,3 +123,25 @@ export function getInferredBadge(start?: Date | string | null | number, end?: Da
   const endYear = formatInferredYear(end);
   return startYear === endYear ? `[Inferred: ${startYear}]` : `[Inferred: ${startYear} → ${endYear}]`;
 }
+
+/**
+ * Returns a cleanly formatted year-level string for a node's lifespan.
+ * e.g., "1995 ~ 1998", "1995", or "Timeless".
+ */
+export function formatNodeLifespan(node: any): string | null {
+  if (!node || !node.temporalInput) return null;
+  if (node.temporalInput === 'TIMELESS') return 'Timeless';
+
+  const parsed = parseFuzzyTemporal(node.temporalInput);
+  const s = node.notEarlierThan || parsed.notEarlierThan;
+  const e = node.notLaterThan || parsed.notLaterThan;
+  
+  const startYear = s ? new Date(s).getUTCFullYear().toString() : 'Open';
+  const endYear = e ? new Date(e).getUTCFullYear().toString() : 'Open';
+  
+  if (startYear !== 'Open' || endYear !== 'Open') {
+    return startYear === endYear ? startYear : `${startYear} ~ ${endYear}`;
+  } 
+  
+  return node.temporalInput;
+}
