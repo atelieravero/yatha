@@ -95,17 +95,18 @@ export default function EdgeRow({
   if (isEditing && !hideEdit) {
     return (
       <div className="p-4 bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/50 rounded-lg shadow-sm animate-in fade-in flex flex-col gap-3">
-        <div className="flex items-center justify-between pb-2 border-b border-blue-100 dark:border-blue-800/30">
-          <div className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+        <div className="flex flex-wrap items-center justify-between pb-2 border-b border-blue-100 dark:border-blue-800/30 gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
             <span>✏️ Editing Relationship to:</span>
             <span className="text-gray-900 dark:text-gray-100 font-bold">{node.label}</span>
           </div>
           <button onClick={() => setIsEditing(false)} disabled={isPending} className="text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 cursor-pointer">✕</button>
         </div>
         
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Changed from grid-cols-2 to flex-col to prevent squishing */}
+        <div className="flex flex-col gap-4">
           <div>
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
               <label className="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">Temporal Bounds</label>
               <label className="flex items-center gap-1.5 cursor-pointer" title="Mark this relationship as timeless (e.g. Influence)">
                 <span className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase">Timeless</span>
