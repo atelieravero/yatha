@@ -5,10 +5,12 @@ import { updateNodeLabel } from "@/app/actions";
 
 export default function NodeLabelEditor({ 
   nodeId, 
-  initialLabel 
+  initialLabel,
+  canWrite = true
 }: { 
   nodeId: string; 
   initialLabel: string; 
+  canWrite?: boolean;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [label, setLabel] = useState(initialLabel);
@@ -54,7 +56,7 @@ export default function NodeLabelEditor({
           onChange={(e) => setLabel(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={isPending}
-          className="text-4xl font-serif font-medium text-gray-900 border-b-2 border-blue-500 focus:outline-none bg-transparent w-full md:w-3/4"
+          className="text-4xl font-serif font-medium text-gray-900 dark:text-zinc-100 border-b-2 border-blue-500 focus:outline-none bg-transparent w-full md:w-3/4 transition-colors"
         />
         <button 
           onClick={handleSave} 
@@ -69,14 +71,16 @@ export default function NodeLabelEditor({
 
   return (
     <h1 
-      onClick={() => setIsEditing(true)}
-      className="group flex items-center gap-3 text-4xl font-serif font-medium text-gray-900 mb-2 cursor-pointer hover:bg-gray-50 rounded-md -ml-2 p-2 transition-colors w-fit"
-      title="Click to edit node name"
+      onClick={() => canWrite && setIsEditing(true)}
+      className={`group flex items-center gap-3 text-4xl font-serif font-medium text-gray-900 dark:text-zinc-100 mb-2 rounded-md -ml-2 p-2 w-fit transition-colors ${canWrite ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-zinc-800' : ''}`}
+      title={canWrite ? "Click to edit node name" : undefined}
     >
       {initialLabel}
-      <span className="text-blue-500 text-2xl opacity-0 group-hover:opacity-100 transition-opacity">
-        ✎
-      </span>
+      {canWrite && (
+        <span className="text-blue-500 text-2xl opacity-0 group-hover:opacity-100 transition-opacity">
+          ✎
+        </span>
+      )}
     </h1>
   );
 }

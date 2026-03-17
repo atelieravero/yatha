@@ -5,10 +5,15 @@
 ## 1. Tech Stack & Environment
 
 * Next.js App Router (`force-dynamic` extensively used).
+
 * PostgreSQL + Drizzle ORM.
-* Tailwind CSS.
+
+* Tailwind CSS v4.
+
 * **Auth.js (NextAuth) v5:** Google SSO. Requires a strict split between `auth.config.ts` (Edge-safe for Next.js `middleware.ts`) and `auth.ts` (Node-safe with DB adapters).
+
 * **Server Actions ONLY:** All database mutations happen via `actions.ts`. No API routes (`/api/...`) except for NextAuth.
+
 * **Direct-to-S3 Uploads:** Files are NEVER uploaded to the Next.js server. The server issues presigned Cloudflare R2 URLs, and the client browser `PUT`s the file directly to storage.
 
 ## 2. The 3-Layer Ontology (CRITICAL)
@@ -16,7 +21,9 @@
 The database `nodes` table has a strict `layer` column:
 
 1. `IDENTITY`: Abstract concepts (People, Artworks, Ideas). Uses the `kind` column to map to a user-defined dictionary taxonomy.
-2. `PHYSICAL`: Tangible custody tokens (Boxes, Books). The `kind` column MUST BE `NULL` or mapped to fixed Instance constants.
+
+2. `PHYSICAL`: Tangible custody tokens (Boxes, Books). The `kind` column MUST BE `NULL` or mapped to fixed Instance constants (like `PHYSICAL_OBJECT`).
+
 3. `MEDIA`: Digital files and URLs. The `kind` column MUST BE `NULL`. Render UI based on `properties.mimeType` and `properties.hash`.
 
 *Anti-Pattern:* Never use strings like `PHYSICAL_OBJECT` or `IMAGE` in the `kind` column for Layer 1 Identities.
@@ -24,28 +31,45 @@ The database `nodes` table has a strict `layer` column:
 ## 3. The Graph Physics & Predicate Constraints
 
 Edges strictly govern relationships.
+
 * **`CARRIES` (Structural):** `[PHYSICAL | MEDIA] -> CARRIES -> [IDENTITY]` or `[MEDIA] -> CARRIES -> [PHYSICAL]`.
+
 * **`CONTAINS` (Aggregation):** `[PHYSICAL] -> CONTAINS -> [PHYSICAL]` or `[IDENTITY] -> CONTAINS -> [ANY]`.
+
 * **Semantics (User Defined):** Governed by the `predicates` table.
+
   * **Core Rule:** `PHYSICAL <-> PHYSICAL` and `MEDIA <-> MEDIA` are globally forbidden for semantic links to prevent graph hairballs.
+
   * **Dynamic Constraints:** The UI strictly reads the `predicates` table (`sourceLayers`, `targetLayers`) to filter search results.
 
-## 4. Authentication & User Context
+  * **Universal Locators:** We do *not* use a `REFERENCES` system predicate. All spatial/positional data (e.g., "Top left corner") is stored in the `locator` JSONB property of *any* standard Semantic Edge.
 
-* **Secure Actions:** All server actions that mutate the graph MUST call `await requireUserId()` to extract the UUID from the NextAuth session. *Never* use the legacy `"system_user"` fallback string.
-* **Admin Bootstrap:** The system provisions the first Superuser via the `ADMIN_EMAIL` environment variable inside the Auth.js `signIn` callback.
-* **License/Middleware:** `middleware.ts` forces authentication on all non-API routes and enforces environment-level license expiry dates.
+## 4. The 4-Gateway Creation Model
 
-## 5. Event Sourcing, Soft Deletes, & Safety
+We have completely unified global minting (Sidebar) and contextual linking (`UniversalBuilder`). Both use the exact same **4-Gateway System**:
 
-* **Snapshot Ledger:** Every destructive update (`updateNodeProperties`, `updateNodeLabel`, `deactivateNode`) must call `captureNodeSnapshot(nodeId, userId)` FIRST. This inserts the previous state into `node_history`, allowing users to rewind time. 
-* **Soft Deletes (Tombstones):** Never execute a `DELETE` statement. Deleting a node simply toggles `isActive: false`. 
-  * The main `page.tsx` intercepts this flag and renders a grayed-out "Tombstone" UI.
-  * `searchGraphNodes` strictly hides `isActive: false`.
-  * Global deduplication checkers MUST detect trash matches and offer a "Restore Record" prompt.
-* **Zombie Links:** `EdgeRow` components evaluate if their connected target is dead (`isActive === false`) and render a strikethrough to maintain historical truth without breaking the UI.
+1. **Concept (IDENTITY):** Opens a text form + Kind dropdown.
 
-## 6. UI/UX Navigation Conventions
+2. **Physical (PHYSICAL):** Opens a text form.
+
+3. **Upload (FILE):** Opens a drag-and-drop zone. Hashes locally. Hard dedupe logic.
+
+4. **URL (URL):** Opens a URL input. Hard dedupe logic. Converts YouTube URLs to standard hashes automatically.
+
+## 5. UI Layout & Component State (Gotchas)
+
+* **Peek Drawer Parity:** The `PeekDrawer.tsx` is not a dumping ground. It MUST strictly replicate the interleaved layout blocks of the main `page.tsx` (Properties, CollapsibleEdgeBlocks, Viewers) exactly as they appear in the primary view.
+
+* **React State Leakage:** When building client components that render node data (like `PropertiesEditor`), you MUST include a `useEffect` hook that explicitly wipes the local form state when the `nodeId` prop changes. Otherwise, React will reuse the component instance and leak dirty form data into the new node's page.
 
 * **Scroll Preservation:** Always use Next.js `<Link scroll={false} href="...">` for sidebar and edge navigation to prevent the main panel from losing its vertical scroll position.
-* **Layout Physics (Peek Drawer):** Avoid complex React state for layout shifts. The main workspace dynamically resizes using a reactive Tailwind margin (`className={peekNode ? "xl:mr-[28rem]" : ""}`) to smoothly slide the central column out of the way when the Peek Drawer opens.
+
+## 6. Event Sourcing, Soft Deletes, & Safety
+
+* **Snapshot Ledger:** Every destructive update (`updateNodeProperties`, `updateNodeLabel`, `deactivateNode`) must call `captureNodeSnapshot(nodeId, userId)` FIRST. This inserts the previous state into `node_history`.
+
+* **Soft Deletes (Tombstones):** Never execute a `DELETE` statement. Deleting a node simply toggles `isActive: false`.
+
+  * The main `page.tsx` intercepts this flag and renders a grayed-out "Tombstone" UI.
+
+  * Global deduplication checkers MUST detect trash matches and offer a "Restore Record" prompt.

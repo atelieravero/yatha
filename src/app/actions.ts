@@ -43,44 +43,25 @@ export async function getAllUsers() {
 export async function inviteUser(email: string, role: string) {
   await requireSuperuser();
   
-  // Basic validation
   const normalizedEmail = email.toLowerCase().trim();
-  if (!normalizedEmail || !normalizedEmail.includes('@')) {
-    throw new Error("Invalid email address.");
-  }
+  if (!normalizedEmail || !normalizedEmail.includes('@')) throw new Error("Invalid email address.");
 
-  // Ensure they don't already exist
   const existing = await db.select().from(users).where(eq(users.email, normalizedEmail));
-  if (existing.length > 0) {
-    throw new Error("User already exists.");
-  }
+  if (existing.length > 0) throw new Error("User already exists.");
 
-  await db.insert(users).values({
-    email: normalizedEmail,
-    role: role,
-    isActive: true,
-  });
-
+  await db.insert(users).values({ email: normalizedEmail, role: role, isActive: true });
   revalidatePath('/admin');
 }
 
 export async function updateUserRole(userId: string, newRole: string) {
   await requireSuperuser();
-  
-  await db.update(users)
-    .set({ role: newRole })
-    .where(eq(users.id, userId));
-    
+  await db.update(users).set({ role: newRole }).where(eq(users.id, userId));
   revalidatePath('/admin');
 }
 
 export async function toggleUserAccess(userId: string, isActive: boolean) {
   await requireSuperuser();
-  
-  await db.update(users)
-    .set({ isActive })
-    .where(eq(users.id, userId));
-    
+  await db.update(users).set({ isActive }).where(eq(users.id, userId));
   revalidatePath('/admin');
 }
 
@@ -89,12 +70,7 @@ export async function toggleUserAccess(userId: string, isActive: boolean) {
 // ============================================================================
 
 export async function getRecentNodes() {
-  return await db
-    .select()
-    .from(nodes)
-    .where(eq(nodes.isActive, true)) // STRICTLY ACTIVE ONLY
-    .orderBy(desc(nodes.updatedAt))
-    .limit(50);
+  return await db.select().from(nodes).where(eq(nodes.isActive, true)).orderBy(desc(nodes.updatedAt)).limit(50);
 }
 
 export async function searchGraphNodes(query: string) {
@@ -102,15 +78,35 @@ export async function searchGraphNodes(query: string) {
     .select()
     .from(nodes)
     .where(
-      and(
-        eq(nodes.isActive, true), // Hide trash from standard search
-        or(
-          ilike(nodes.label, `%${query}%`),
-          sql`array_to_string(${nodes.aliases}, ', ') ILIKE ${`%${query}%`}`
-        )
+      or(
+        // 1. Search the primary label
+        ilike(nodes.label, `%${query}%`),
+        // 2. Search the aliases array (converts the text[] to a string for fuzzy matching)
+        sql`array_to_string(${nodes.aliases}, ', ') ILIKE ${`%${query}%`}`
       )
     )
     .limit(20);
+}
+
+// ============================================================================
+// PEEK DRAWER CONTEXT GETTER
+// ============================================================================
+
+export async function getQuickContext(nodeId: string) {
+  const connectedEdges = await db.select()
+    .from(edges)
+    .where(and(eq(edges.isActive, true), or(eq(edges.sourceId, nodeId), eq(edges.targetId, nodeId))));
+    
+  if (connectedEdges.length === 0) return { edges: [], relatedNodes: [] };
+
+  const relatedNodeIds = connectedEdges.map(e => e.sourceId === nodeId ? e.targetId : e.sourceId);
+  const uniqueNodeIds = Array.from(new Set(relatedNodeIds));
+  
+  const relatedNodes = await db.select()
+    .from(nodes)
+    .where(inArray(nodes.id, uniqueNodeIds));
+
+  return { edges: connectedEdges, relatedNodes };
 }
 
 // ============================================================================
@@ -136,8 +132,20 @@ async function captureNodeSnapshot(nodeId: string, userId: string) {
 
 export async function getNodeHistory(nodeId: string) {
   return await db
-    .select()
+    .select({
+       snapshotId: nodeHistory.snapshotId,
+       replacedAt: nodeHistory.replacedAt,
+       previousLabel: nodeHistory.previousLabel,
+       previousKind: nodeHistory.previousKind,
+       previousAliases: nodeHistory.previousAliases,
+       previousTemporalInput: nodeHistory.previousTemporalInput,
+       previousProperties: nodeHistory.previousProperties,
+       userName: users.name,
+       userEmail: users.email,
+       userAvatar: users.avatar
+    })
     .from(nodeHistory)
+    .leftJoin(users, eq(nodeHistory.replacedBy, users.id)) 
     .where(eq(nodeHistory.nodeId, nodeId))
     .orderBy(desc(nodeHistory.replacedAt));
 }
@@ -159,7 +167,7 @@ export async function restoreNodeSnapshot(nodeId: string, snapshotId: string) {
       notEarlierThan: bounds.notEarlierThan || null,
       notLaterThan: bounds.notLaterThan || null,
       properties: snapshot.previousProperties,
-      isActive: true, // ALWAYS RESURRECT IF RESTORING A SNAPSHOT
+      isActive: true, 
       updatedAt: new Date(),
       updatedBy: userId
     })
@@ -174,31 +182,17 @@ export async function restoreNodeSnapshot(nodeId: string, snapshotId: string) {
 
 export async function deactivateNode(nodeId: string) {
   const userId = await requireUserId();
-  await captureNodeSnapshot(nodeId, userId); // Log who deleted it
+  await captureNodeSnapshot(nodeId, userId); 
   
-  await db.update(nodes)
-    .set({ 
-      isActive: false, 
-      updatedAt: new Date(), 
-      updatedBy: userId 
-    })
-    .where(eq(nodes.id, nodeId));
-
+  await db.update(nodes).set({ isActive: false, updatedAt: new Date(), updatedBy: userId }).where(eq(nodes.id, nodeId));
   revalidatePath('/');
 }
 
 export async function restoreNode(nodeId: string) {
   const userId = await requireUserId();
-  await captureNodeSnapshot(nodeId, userId); // Log who restored it
+  await captureNodeSnapshot(nodeId, userId); 
   
-  await db.update(nodes)
-    .set({ 
-      isActive: true, 
-      updatedAt: new Date(), 
-      updatedBy: userId 
-    })
-    .where(eq(nodes.id, nodeId));
-
+  await db.update(nodes).set({ isActive: true, updatedAt: new Date(), updatedBy: userId }).where(eq(nodes.id, nodeId));
   revalidatePath('/');
 }
 
@@ -211,45 +205,27 @@ export async function getAllKinds() {
 }
 
 export async function createKind(label: string, icon: string) {
-  await requireUserId();
-  await db.insert(kinds).values({ 
-    label, 
-    icon: icon || '🟣', 
-    isActive: true 
-  });
+  await requireSuperuser();
+  await db.insert(kinds).values({ label, icon: icon || '🟣', isActive: true });
   revalidatePath('/');
 }
 
 export async function updateKind(id: string, label: string, icon: string) {
-  await requireUserId();
-  await db.update(kinds)
-    .set({ 
-      label, 
-      icon: icon || '🟣' 
-    })
-    .where(eq(kinds.id, id));
+  await requireSuperuser();
+  await db.update(kinds).set({ label, icon: icon || '🟣' }).where(eq(kinds.id, id));
   revalidatePath('/');
 }
 
 export async function deactivateAndMigrateKind(oldKindId: string, newKindId: string) {
-  const userId = await requireUserId();
+  const userId = await requireSuperuser();
   if (oldKindId === newKindId) throw new Error("Cannot migrate a kind to itself.");
 
   const affectedNodes = await db.select().from(nodes).where(eq(nodes.kind, oldKindId));
-  for (const node of affectedNodes) { 
-    await captureNodeSnapshot(node.id, userId); 
-  }
+  for (const node of affectedNodes) { await captureNodeSnapshot(node.id, userId); }
 
   if (affectedNodes.length > 0) {
-    await db.update(nodes)
-      .set({ 
-        kind: newKindId, 
-        updatedAt: new Date(), 
-        updatedBy: userId 
-      })
-      .where(eq(nodes.kind, oldKindId));
+    await db.update(nodes).set({ kind: newKindId, updatedAt: new Date(), updatedBy: userId }).where(eq(nodes.kind, oldKindId));
   }
-  
   await db.update(kinds).set({ isActive: false }).where(eq(kinds.id, oldKindId));
   revalidatePath('/');
 }
@@ -269,56 +245,28 @@ export async function seedSystemPredicates() {
 }
 
 export async function createPredicate(
-  forwardLabel: string, 
-  reverseLabel: string, 
-  isSymmetric: boolean, 
-  sourceLayers: string[] | null = null, 
-  targetLayers: string[] | null = null, 
-  sourceDefaultKind: string | null = null, 
-  targetDefaultKind: string | null = null
+  forwardLabel: string, reverseLabel: string, isSymmetric: boolean, sourceLayers: string[] | null = null, targetLayers: string[] | null = null, sourceDefaultKind: string | null = null, targetDefaultKind: string | null = null
 ) {
-  await requireUserId();
+  await requireSuperuser();
   const [newPred] = await db.insert(predicates).values({
-    forwardLabel, 
-    reverseLabel: isSymmetric ? forwardLabel : reverseLabel, 
-    isSymmetric, 
-    isSystem: false, 
-    isActive: true, 
-    sourceLayers, 
-    targetLayers, 
-    sourceDefaultKind, 
-    targetDefaultKind
+    forwardLabel, reverseLabel: isSymmetric ? forwardLabel : reverseLabel, isSymmetric, isSystem: false, isActive: true, sourceLayers, targetLayers, sourceDefaultKind, targetDefaultKind
   }).returning({ id: predicates.id }); 
-  
   revalidatePath('/');
   return newPred.id;
 }
 
 export async function updatePredicate(
-  id: string, 
-  forwardLabel: string, 
-  reverseLabel: string, 
-  isSymmetric: boolean, 
-  sourceLayers: string[] | null = null, 
-  targetLayers: string[] | null = null, 
-  sourceDefaultKind: string | null = null, 
-  targetDefaultKind: string | null = null
+  id: string, forwardLabel: string, reverseLabel: string, isSymmetric: boolean, sourceLayers: string[] | null = null, targetLayers: string[] | null = null, sourceDefaultKind: string | null = null, targetDefaultKind: string | null = null
 ) {
-  await requireUserId();
+  await requireSuperuser();
   await db.update(predicates).set({ 
-    forwardLabel, 
-    reverseLabel: isSymmetric ? forwardLabel : reverseLabel, 
-    isSymmetric, 
-    sourceLayers, 
-    targetLayers, 
-    sourceDefaultKind, 
-    targetDefaultKind
+    forwardLabel, reverseLabel: isSymmetric ? forwardLabel : reverseLabel, isSymmetric, sourceLayers, targetLayers, sourceDefaultKind, targetDefaultKind
   }).where(eq(predicates.id, id));
   revalidatePath('/');
 }
 
 export async function deactivateAndMigratePredicate(oldId: string, newId: string) {
-  const userId = await requireUserId();
+  const userId = await requireSuperuser();
   if (oldId === newId) throw new Error("Cannot migrate a predicate to itself.");
   
   const [oldPred] = await db.select().from(predicates).where(eq(predicates.id, oldId));
@@ -326,13 +274,7 @@ export async function deactivateAndMigratePredicate(oldId: string, newId: string
 
   const affectedEdges = await db.select().from(edges).where(eq(edges.predicateId, oldId));
   if (affectedEdges.length > 0) {
-    await db.update(edges)
-      .set({ 
-        predicateId: newId, 
-        assertedAt: new Date(), 
-        assertedBy: userId 
-      })
-      .where(eq(edges.predicateId, oldId));
+    await db.update(edges).set({ predicateId: newId, assertedAt: new Date(), assertedBy: userId }).where(eq(edges.predicateId, oldId));
   }
 
   await db.update(predicates).set({ isActive: false }).where(eq(predicates.id, oldId));
@@ -340,17 +282,13 @@ export async function deactivateAndMigratePredicate(oldId: string, newId: string
 }
 
 // ============================================================================
-// NODE CREATION & UPDATES (3-Layer Native)
+// NODE CREATION & UPDATES
 // ============================================================================
 
 export async function createNode(label: string, layer: "IDENTITY" | "PHYSICAL" | "MEDIA", kind?: string | null, properties?: any) {
   const userId = await requireUserId();
   const [newNode] = await db.insert(nodes).values({
-    layer, 
-    kind: kind || null, 
-    label, 
-    properties: properties || {}, 
-    updatedBy: userId, 
+    layer, kind: kind || null, label, properties: properties || {}, updatedBy: userId, 
   }).returning({ id: nodes.id });
 
   revalidatePath('/');
@@ -360,45 +298,21 @@ export async function createNode(label: string, layer: "IDENTITY" | "PHYSICAL" |
 export async function updateNodeLabel(nodeId: string, label: string) {
   const userId = await requireUserId();
   await captureNodeSnapshot(nodeId, userId);
-  
-  await db.update(nodes)
-    .set({ 
-      label, 
-      updatedAt: new Date(), 
-      updatedBy: userId 
-    })
-    .where(eq(nodes.id, nodeId));
-    
+  await db.update(nodes).set({ label, updatedAt: new Date(), updatedBy: userId }).where(eq(nodes.id, nodeId));
   revalidatePath('/');
 }
 
 export async function updateNodeKind(nodeId: string, kind: string) {
   const userId = await requireUserId();
   await captureNodeSnapshot(nodeId, userId);
-  
-  await db.update(nodes)
-    .set({ 
-      kind: kind, 
-      updatedAt: new Date(), 
-      updatedBy: userId 
-    })
-    .where(eq(nodes.id, nodeId));
-    
+  await db.update(nodes).set({ kind: kind, updatedAt: new Date(), updatedBy: userId }).where(eq(nodes.id, nodeId));
   revalidatePath('/');
 }
 
 export async function updateNodeAliases(nodeId: string, aliases: string[]) {
   const userId = await requireUserId();
   await captureNodeSnapshot(nodeId, userId);
-  
-  await db.update(nodes)
-    .set({ 
-      aliases, 
-      updatedAt: new Date(), 
-      updatedBy: userId 
-    })
-    .where(eq(nodes.id, nodeId));
-    
+  await db.update(nodes).set({ aliases, updatedAt: new Date(), updatedBy: userId }).where(eq(nodes.id, nodeId));
   revalidatePath('/');
 }
 
@@ -425,12 +339,7 @@ export async function updateNodeProperties(nodeId: string, newProps: any) {
   }
 
   await db.update(nodes).set({ 
-    properties: updatedProps, 
-    temporalInput: temporalInput || null, 
-    notEarlierThan, 
-    notLaterThan, 
-    updatedAt: new Date(), 
-    updatedBy: userId 
+    properties: updatedProps, temporalInput: temporalInput || null, notEarlierThan, notLaterThan, updatedAt: new Date(), updatedBy: userId 
   }).where(eq(nodes.id, nodeId));
   
   revalidatePath('/');
@@ -458,21 +367,11 @@ export async function attachFileToNode(nodeId: string, fileUrl: string, mimeType
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const updatedProps = { 
-    ...existingProps, 
-    fileUrl, 
-    mimeType, 
-    fileSize: formatBytes(fileSize), 
-    hash 
-  };
+  const updatedProps = { ...existingProps, fileUrl, mimeType, fileSize: formatBytes(fileSize), hash };
   
-  await db.update(nodes)
-    .set({ 
-      properties: updatedProps, 
-      updatedAt: new Date(), 
-      updatedBy: userId 
-    })
-    .where(eq(nodes.id, nodeId));
+  await db.update(nodes).set({ 
+    properties: updatedProps, updatedAt: new Date(), updatedBy: userId 
+  }).where(eq(nodes.id, nodeId));
   
   revalidatePath('/'); 
 }
@@ -487,13 +386,7 @@ export async function getSecureMediaUrl(filename: string) {
 // ============================================================================
 
 export async function assertEdge(
-  sourceId: string, 
-  targetId: string, 
-  predicateId: string, 
-  category: "SEMANTIC" | "STRUCTURAL" | "CONTAINMENT", 
-  temporalInput?: string | null, 
-  sortOrder?: number | null, 
-  properties?: Record<string, any>
+  sourceId: string, targetId: string, predicateId: string, category: "SEMANTIC" | "STRUCTURAL" | "CONTAINMENT", temporalInput?: string | null, sortOrder?: number | null, properties?: Record<string, any>
 ) {
   const userId = await requireUserId();
   if (sourceId === targetId) throw new Error("Nodes cannot be related to themselves.");
@@ -510,30 +403,14 @@ export async function assertEdge(
   }
 
   await db.insert(edges).values({
-    sourceId: finalSource, 
-    targetId: finalTarget, 
-    predicateId, 
-    category, 
-    temporalInput: temporalInput || null, 
-    notEarlierThan: bounds.notEarlierThan || null, 
-    notLaterThan: bounds.notLaterThan || null, 
-    properties: properties || {}, 
-    sourceSortOrder: sortOrder || 999, 
-    targetSortOrder: sortOrder || 999, 
-    assertedBy: userId, 
-    isActive: true, 
-    retractedAt: null, 
+    sourceId: finalSource, targetId: finalTarget, predicateId, category, temporalInput: temporalInput || null, notEarlierThan: bounds.notEarlierThan || null, notLaterThan: bounds.notLaterThan || null, properties: properties || {}, sourceSortOrder: sortOrder || 999, targetSortOrder: sortOrder || 999, assertedBy: userId, isActive: true, retractedAt: null, 
   });
-  
   revalidatePath('/');
 }
 
 export async function retractEdge(edgeId: string) {
   await requireUserId();
-  await db.update(edges)
-    .set({ isActive: false, retractedAt: new Date() })
-    .where(eq(edges.id, edgeId));
-    
+  await db.update(edges).set({ isActive: false, retractedAt: new Date() }).where(eq(edges.id, edgeId));
   revalidatePath('/');
 }
 
@@ -546,53 +423,10 @@ export async function updateEdgeProperties(edgeId: string, newTemporalInput: str
   const updatedProps = newProperties ? { ...(existingEdge.properties as Record<string, any>), ...newProperties } : existingEdge.properties;
 
   await db.update(edges).set({ isActive: false, retractedAt: new Date() }).where(eq(edges.id, edgeId));
-  
   await db.insert(edges).values({
-    sourceId: existingEdge.sourceId, 
-    targetId: existingEdge.targetId, 
-    predicateId: existingEdge.predicateId, 
-    category: existingEdge.category as "SEMANTIC" | "STRUCTURAL" | "CONTAINMENT", 
-    temporalInput: newTemporalInput || null, 
-    notEarlierThan: bounds.notEarlierThan || null, 
-    notLaterThan: bounds.notLaterThan || null, 
-    properties: updatedProps, 
-    sourceSortOrder: existingEdge.sourceSortOrder, 
-    targetSortOrder: existingEdge.targetSortOrder, 
-    assertedBy: userId, 
-    isActive: true, 
-    retractedAt: null, 
+    sourceId: existingEdge.sourceId, targetId: existingEdge.targetId, predicateId: existingEdge.predicateId, category: existingEdge.category as "SEMANTIC" | "STRUCTURAL" | "CONTAINMENT", temporalInput: newTemporalInput || null, notEarlierThan: bounds.notEarlierThan || null, notLaterThan: bounds.notLaterThan || null, properties: updatedProps, sourceSortOrder: existingEdge.sourceSortOrder, targetSortOrder: existingEdge.targetSortOrder, assertedBy: userId, isActive: true, retractedAt: null, 
   });
-  
   revalidatePath('/');
-}
-
-// ============================================================================
-// PEEK DRAWER CONTEXT GETTER
-// ============================================================================
-
-export async function getQuickContext(nodeId: string) {
-  const connectedEdges = await db.select().from(edges).where(and(eq(edges.isActive, true), or(eq(edges.sourceId, nodeId), eq(edges.targetId, nodeId))));
-  if (connectedEdges.length === 0) return [];
-
-  const allPreds = await db.select().from(predicates);
-  const relatedNodeIds = connectedEdges.map(e => e.sourceId === nodeId ? e.targetId : e.sourceId);
-  const uniqueNodeIds = Array.from(new Set(relatedNodeIds));
-  
-  // Note: We pull `isActive` here so the UI can style "Zombie Links" correctly!
-  const relatedNodes = await db.select({ id: nodes.id, label: nodes.label, isActive: nodes.isActive }).from(nodes).where(inArray(nodes.id, uniqueNodeIds));
-
-  return connectedEdges.map(edge => {
-    const isSource = edge.sourceId === nodeId;
-    const targetNodeId = isSource ? edge.targetId : edge.sourceId;
-    const targetNode = relatedNodes.find(n => n.id === targetNodeId);
-    const pred = allPreds.find(p => p.id === edge.predicateId);
-    return { 
-      predicate: pred ? (isSource ? pred.forwardLabel : pred.reverseLabel) : 'UNKNOWN', 
-      label: targetNode ? targetNode.label : 'Unknown Node', 
-      isSystem: pred ? pred.isSystem : false,
-      isTargetActive: targetNode ? targetNode.isActive : true // Pass dead link status to drawer
-    };
-  });
 }
 
 // ============================================================================
@@ -600,32 +434,13 @@ export async function getQuickContext(nodeId: string) {
 // ============================================================================
 
 export async function checkDuplicateArtifact(hash: string) {
-  // We explicitly fetch `isActive` so the dedupe UI can detect Trash files!
-  const [existing] = await db
-    .select({ 
-      id: nodes.id, 
-      label: nodes.label, 
-      layer: nodes.layer, 
-      isActive: nodes.isActive 
-    })
-    .from(nodes)
-    .where(sql`${nodes.properties}->>'hash' = ${hash}`);
-    
+  const [existing] = await db.select({ id: nodes.id, label: nodes.label, layer: nodes.layer, isActive: nodes.isActive }).from(nodes).where(sql`${nodes.properties}->>'hash' = ${hash}`);
   return existing || null;
 }
 
-// Soft dedupe helper for checking existing Identity/Physical concepts by exact label
 export async function getExactMatchNode(label: string, layer: "IDENTITY" | "PHYSICAL") {
   const normalizedLabel = label.toLowerCase().trim();
-  
-  const [existing] = await db
-    .select({ 
-      id: nodes.id, 
-      label: nodes.label, 
-      layer: nodes.layer, 
-      isActive: nodes.isActive, 
-      aliases: nodes.aliases 
-    })
+  const [existing] = await db.select({ id: nodes.id, label: nodes.label, layer: nodes.layer, isActive: nodes.isActive, aliases: nodes.aliases })
     .from(nodes)
     .where(
       and(
@@ -637,15 +452,11 @@ export async function getExactMatchNode(label: string, layer: "IDENTITY" | "PHYS
       )
     )
     .limit(1);
-    
   return existing || null;
 }
 
 export async function createDigitalArtifact(
-  targetId: string, 
-  label: string, 
-  kind: string | null, 
-  fileData: { fileUrl: string, mimeType: string, fileSize: number, hash: string }
+  targetId: string, label: string, kind: string | null, fileData: { fileUrl: string, mimeType: string, fileSize: number, hash: string }
 ) {
   const userId = await requireUserId();
   const formatBytes = (bytes: number) => {
@@ -657,25 +468,11 @@ export async function createDigitalArtifact(
   };
 
   const [newNode] = await db.insert(nodes).values({
-    layer: 'MEDIA', 
-    kind: null, 
-    label, 
-    properties: { 
-      fileUrl: fileData.fileUrl, 
-      mimeType: fileData.mimeType, 
-      fileSize: formatBytes(fileData.fileSize), 
-      hash: fileData.hash 
-    }, 
-    updatedBy: userId, 
+    layer: 'MEDIA', kind: null, label, properties: { fileUrl: fileData.fileUrl, mimeType: fileData.mimeType, fileSize: formatBytes(fileData.fileSize), hash: fileData.hash }, updatedBy: userId, 
   }).returning({ id: nodes.id });
 
   await db.insert(edges).values({
-    sourceId: newNode.id, 
-    targetId: targetId, 
-    predicateId: SYSTEM_PREDICATES.CARRIES, 
-    category: "STRUCTURAL", 
-    assertedBy: userId, 
-    isActive: true,
+    sourceId: newNode.id, targetId: targetId, predicateId: SYSTEM_PREDICATES.CARRIES, category: "STRUCTURAL", assertedBy: userId, isActive: true,
   });
 
   revalidatePath('/');
@@ -719,6 +516,5 @@ export async function createAndLinkIdentity(label: string, kind: string, sourceI
     assertedBy: userId, 
     isActive: true 
   });
-  
   revalidatePath('/');
 }

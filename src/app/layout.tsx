@@ -37,8 +37,19 @@ export default async function RootLayout({
   }
 
   return (
-    <html lang="en">
-      <body className="antialiased bg-gray-50 text-gray-900 font-sans flex h-screen overflow-hidden">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `
+          try {
+            if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+              document.documentElement.classList.add('dark')
+            } else {
+              document.documentElement.classList.remove('dark')
+            }
+          } catch (_) {}
+        `}} />
+      </head>
+      <body className="antialiased bg-gray-50 dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 font-sans flex h-screen overflow-hidden transition-colors duration-300">
         {/* Conditionally render the Sidebar ONLY if the user is authenticated */}
         {session && (
           <Sidebar 
@@ -49,8 +60,8 @@ export default async function RootLayout({
           />
         )}
         
-        {/* The Main Panel fills the remaining space */}
-        <main className="flex-1 overflow-y-auto relative">
+        {/* The Main Panel fills the remaining space. Added pt-14 for mobile header clearance! */}
+        <main className="flex-1 overflow-y-auto relative pt-14 md:pt-0 bg-gray-50 dark:bg-zinc-950 transition-colors duration-300">
           {children}
         </main>
       </body>

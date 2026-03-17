@@ -3,29 +3,34 @@
 import { useState, useEffect } from "react";
 import { getQuickContext } from "@/app/actions";
 import { getMediaDetails } from "@/lib/mediaUtils";
+import CollapsibleEdgeBlock from "./CollapsibleEdgeBlock";
+import { groupEdges } from "@/lib/edgeGrouping";
 
 export default function PeekDrawer({
   peekNode,
   activeNodeId,
   currentTab,
   activeKinds,
+  allPredicates = [], 
   securePeekUrl 
 }: {
   peekNode: any;
   activeNodeId: string;
   currentTab: string;
   activeKinds: any[];
+  allPredicates?: any[];
   securePeekUrl?: string; 
 }) {
-  const [contextLinks, setContextLinks] = useState<any[]>([]);
+  const [contextData, setContextData] = useState<{ edges: any[], relatedNodes: any[] }>({ edges: [], relatedNodes: [] });
   const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch the lightweight relationship context when the drawer opens
+  // Fetch the full relationship context when the drawer opens
   useEffect(() => {
     if (peekNode) {
       setIsLoading(true);
-      getQuickContext(peekNode.id).then(data => {
-        setContextLinks(data);
+      // NOTE: Expects getQuickContext to return { edges, relatedNodes }
+      getQuickContext(peekNode.id).then((data: any) => {
+        setContextData(data);
         setIsLoading(false);
       });
     }
@@ -34,7 +39,7 @@ export default function PeekDrawer({
   if (!peekNode) return null;
 
   // --------------------------------------------------------------------------
-  // 3-LAYER ICON & LABEL ROUTING (Now using shared utility!)
+  // 3-LAYER ICON & LABEL ROUTING 
   // --------------------------------------------------------------------------
   let icon = '🟣';
   let label = 'Concept';
@@ -49,141 +54,176 @@ export default function PeekDrawer({
     icon = mediaDetails.icon;
     label = mediaDetails.format;
   } else {
-    const kindDef = activeKinds.find(k => k.id === peekNode.kind);
+    const kindDef = activeKinds.find((k: any) => k.id === peekNode.kind);
     if (kindDef) {
       icon = kindDef.icon;
       label = kindDef.label;
     }
   }
-  
-  const closeHref = `/?node=${activeNodeId}&tab=${currentTab}`;
+
+  const closeHref = `/?node=${activeNodeId}${currentTab ? `&tab=${currentTab}` : ''}`;
   const focusHref = `/?node=${peekNode.id}`;
-  
-  // Cleanly resolved booleans from our utility
+
   const { isImage, isVideo, isAudio, isYouTube, isWebLink, ytId } = mediaDetails;
-  
   const propsToDisplay = Object.entries(peekProps).filter(([k]) => k !== 'fileUrl' && k !== 'mimeType' && k !== 'temporal_input' && k !== 'hash');
+  const isTombstone = peekNode.isActive === false;
+
+  // --------------------------------------------------------------------------
+  // EDGE GROUPING
+  // --------------------------------------------------------------------------
+  const groups = groupEdges(contextData.edges || [], peekNode, contextData.relatedNodes || []);
+  const { physicalHoldings, digitalArtifacts, mediaAppearances, conceptualSemantics, bridgedConcepts, physicalSources, containedIn, containsItems } = groups;
+
+  const isIdentity = peekNode.layer === 'IDENTITY';
+  const isPhysical = peekNode.layer === 'PHYSICAL';
+  const isMedia = peekNode.layer === 'MEDIA';
+
+  // Base props required by all edge blocks in the drawer.
+  // Note: hideEdit is strictly forced to TRUE because drawers are read-only views!
+  const edgeContext = {
+    currentTab,
+    activeNodeId: peekNode.id, // The drawer's node is the active node for these blocks
+    activeKinds,
+    allPredicates,
+    hideEdit: true,
+  };
+
+  // --- REUSABLE BLOCKS ---
+  const propertiesBlock = (
+    <div className="space-y-4 mb-4">
+      <h3 className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest border-b border-gray-100 dark:border-zinc-800 pb-1">Properties</h3>
+      <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
+         {propsToDisplay.length === 0 && !peekProps.temporal_input ? (
+           <span className="italic text-gray-400 dark:text-zinc-500 text-xs">No intrinsic properties defined.</span>
+         ) : (
+           <>
+             {peekProps.temporal_input && <span className="font-semibold text-gray-900 dark:text-zinc-100">{peekProps.temporal_input}</span>}
+             {propsToDisplay.map(([key, val]) => {
+               const isSystem = key === 'hash' || key === 'url' || key === 'youtube_id' || key === 'fileSize';
+               return (
+                 <span key={key} className={isSystem ? "text-gray-500 dark:text-zinc-400 font-mono text-[10px] break-all bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700 px-1.5 py-0.5 rounded" : "text-gray-800 dark:text-zinc-200 font-medium"}>
+                   {String(val)}
+                 </span>
+               );
+             })}
+           </>
+         )}
+      </div>
+      {peekProps.notes && (
+        <div className="text-sm text-gray-600 dark:text-zinc-400 leading-relaxed bg-gray-50 dark:bg-zinc-900/50 p-3 rounded-lg border border-gray-100 dark:border-zinc-800/50 shadow-inner">
+          {peekProps.notes}
+        </div>
+      )}
+    </div>
+  );
+
+  const viewerBlock = (
+    <div className="bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden flex items-center justify-center min-h-[200px] shadow-inner transition-colors mb-4">
+       {isYouTube ? (
+          <iframe className="w-full aspect-video" src={`https://www.youtube.com/embed/${ytId}`} allowFullScreen></iframe>
+        ) : isWebLink ? (
+          <a href={mediaDetails.webUrl} target="_blank" rel="noopener noreferrer" className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 shadow-sm transition-colors">Open Web Link ↗</a>
+        ) : securePeekUrl ? (
+          isImage ? <img src={securePeekUrl} alt={peekNode.label} className="max-h-[300px] object-contain" />
+          : isVideo ? <video src={securePeekUrl} controls className="max-h-[300px] w-full object-contain bg-black" />
+          : isAudio ? <audio src={securePeekUrl} controls className="w-full max-w-[250px] m-4" />
+          : <a href={securePeekUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline text-sm font-medium">Download Attached File</a>
+        ) : <div className="text-gray-400 dark:text-zinc-500 text-xs font-bold animate-pulse">Loading secure preview...</div>}
+    </div>
+  );
 
   return (
-    // The container is transparent to keep the user anchored to their main workspace.
-    <div className="fixed inset-0 z-50 flex justify-end bg-transparent pointer-events-none">
+    <div className="fixed inset-0 z-50 flex justify-end items-end md:items-stretch bg-gray-900/20 dark:bg-black/60 md:bg-transparent md:dark:bg-transparent backdrop-blur-sm md:backdrop-blur-none pointer-events-none transition-colors duration-300">
       
-      {/* Slide-over Panel */}
-      <div className="relative w-full max-w-md h-full bg-white shadow-2xl border-l border-gray-200 flex flex-col animate-in slide-in-from-right duration-300 pointer-events-auto">
+      {/* Click outside to close (Useful for mobile overlay) */}
+      <div className="absolute inset-0 cursor-pointer md:hidden pointer-events-auto" onClick={() => window.location.href = closeHref} />
+
+      {/* Slide-over Panel (Slides up on mobile, left on desktop) */}
+      <div className="relative w-full max-w-md h-[85vh] md:h-full bg-white dark:bg-zinc-950 shadow-2xl border-t md:border-t-0 md:border-l border-gray-200 dark:border-zinc-800 flex flex-col animate-in slide-in-from-bottom-full md:slide-in-from-right duration-300 pointer-events-auto rounded-t-2xl md:rounded-none transition-colors">
         
         {/* Header */}
-        <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+        <div className="p-4 border-b border-gray-100 dark:border-zinc-800 flex items-center justify-between bg-gray-50/50 dark:bg-zinc-900/50 rounded-t-2xl md:rounded-none transition-colors">
           <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest bg-gray-200 text-gray-700">
-              <span className="text-xs">{icon}</span> {label}
-            </span>
+            <span className="text-xl opacity-80">{icon}</span>
+            <span className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest">{label}</span>
           </div>
-          <div className="flex gap-2 items-center">
-            <a href={focusHref} className="text-[10px] font-bold uppercase tracking-widest bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 transition-colors shadow-sm">
-              Focus Node ↗
-            </a>
-            <a href={closeHref} className="text-gray-400 hover:text-gray-800 p-2 ml-1 text-lg leading-none cursor-pointer" title="Close drawer">
+          <div className="flex items-center gap-2">
+            <a href={closeHref} className="text-gray-400 hover:text-gray-900 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors p-1 cursor-pointer">
               ✕
             </a>
           </div>
         </div>
 
-        {/* Content */}
-        <div className="p-6 overflow-y-auto flex-1 space-y-8">
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-6">
           
-          {/* 1. Identity / Title Block */}
+          {/* 1. The Core Identity Title */}
           <div>
-            <h2 className="text-3xl font-serif font-medium text-gray-900 leading-tight">{peekNode.label}</h2>
+            <h2 className={`text-2xl font-serif font-medium text-gray-900 dark:text-zinc-100 mb-1 ${isTombstone ? 'line-through decoration-gray-400 dark:decoration-zinc-500' : ''}`}>
+              {peekNode.label}
+            </h2>
+            {isTombstone && <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest block mb-2">(Deleted Record)</span>}
             {peekNode.aliases && peekNode.aliases.length > 0 && (
-              <p className="text-sm text-gray-500 font-mono mt-1">{peekNode.aliases.join(' • ')}</p>
+              <p className="text-sm text-gray-500 dark:text-zinc-400 font-mono mb-2">
+                {peekNode.aliases.join(' • ')}
+              </p>
             )}
-          </div>
-
-          {/* 2. Media Preview */}
-          {(securePeekUrl || isYouTube || isWebLink) && (
-            <div className="rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center border border-gray-200 min-h-[160px]">
-              {isYouTube ? (
-                <iframe 
-                  className="w-full aspect-video" 
-                  src={`https://www.youtube.com/embed/${ytId}`} 
-                  title="YouTube video player" 
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-                  allowFullScreen
-                ></iframe>
-              ) : isWebLink ? (
-                <div className="p-6 text-center flex flex-col items-center gap-3">
-                  <span className="text-4xl block mb-1">🔗</span>
-                  <a href={securePeekUrl} target="_blank" rel="noopener noreferrer" className="px-4 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 transition-colors shadow-sm text-xs">
-                    Open Web Link ↗
-                  </a>
-                  <span className="text-[10px] text-gray-500 font-mono break-all max-w-full bg-white border border-gray-200 p-1.5 rounded">{securePeekUrl}</span>
-                </div>
-              ) : isImage ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img src={securePeekUrl} alt={peekNode.label} className="max-h-64 object-contain w-full" />
-              ) : isVideo ? (
-                <video src={securePeekUrl} controls className="w-full max-h-64 object-contain bg-black" />
-              ) : isAudio ? (
-                <div className="p-6 w-full flex flex-col items-center justify-center gap-3">
-                  <span className="text-4xl mb-1">🎵</span>
-                  <audio src={securePeekUrl} controls className="w-full" />
-                </div>
-              ) : (
-                <div className="p-6 text-center">
-                  <span className="text-3xl block mb-2">📄</span>
-                  <a href={securePeekUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm font-medium">
-                    View Secure File
-                  </a>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* 3. Quick Properties Block */}
-          <div className="space-y-4">
-            <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-100 pb-1">Quick Facts</h3>
-            <div className="space-y-3">
-              {peekNode.temporalInput && (
-                <div>
-                  <span className="font-bold text-gray-500 uppercase tracking-wider text-[10px] block mb-0.5">Temporal Bounds</span>
-                  <span className="text-sm text-gray-900 font-medium">{peekNode.temporalInput}</span>
-                </div>
-              )}
-              {propsToDisplay.map(([key, val]) => (
-                <div key={key}>
-                  <span className="font-bold text-gray-500 uppercase tracking-wider text-[10px] block mb-0.5">{key.replace('_', ' ')}</span>
-                  <span className="text-sm text-gray-900 break-words whitespace-pre-wrap">{String(val)}</span>
-                </div>
-              ))}
-              {propsToDisplay.length === 0 && !peekNode.temporalInput && (
-                <span className="text-xs text-gray-400 italic">No intrinsic properties set.</span>
-              )}
-            </div>
-          </div>
-
-          {/* 4. Read-Only Context Block */}
-          <div className="space-y-4">
-            <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-100 pb-1">Graph Context</h3>
             
+            <a 
+              href={focusHref} 
+              className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors mt-2 mb-6 border border-blue-200 dark:border-blue-800/50 px-3 py-1.5 rounded bg-blue-50 dark:bg-blue-900/20 shadow-sm"
+            >
+              Focus this record ↗
+            </a>
+          </div>
+
+          {/* Dynamic Structured Parity Layout */}
+          <div className="space-y-2">
             {isLoading ? (
-              <div className="flex items-center gap-2 text-xs text-gray-400 animate-pulse">
-                <span className="text-lg">⏳</span> Loading relationships...
+              <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-zinc-500 animate-pulse py-4">
+                <span className="text-lg">⏳</span> Loading context...
               </div>
-            ) : contextLinks.length === 0 ? (
-              <span className="text-xs text-gray-400 italic">No structural or semantic links mapped.</span>
             ) : (
-              <div className="space-y-2">
-                {contextLinks.map((link, i) => (
-                  <div key={i} className="flex items-baseline gap-2 text-sm">
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border whitespace-nowrap uppercase tracking-wider ${link.isSystem ? 'text-amber-700 bg-amber-50 border-amber-100' : 'text-blue-600 bg-blue-50 border-blue-100'}`}>
-                      {link.predicate}
-                    </span>
-                    <span className="text-gray-700 truncate">{link.label}</span>
-                  </div>
-                ))}
-                <div className="pt-2 text-xs text-gray-400 italic mt-2">
-                  Focus this node to view full relationship details.
-                </div>
+              <div className="flex flex-col">
+                
+                {/* --- A. IDENTITY PARITY --- */}
+                {isIdentity && (
+                  <>
+                    {propertiesBlock}
+                    <CollapsibleEdgeBlock {...edgeContext} title="Physical Holdings" icon="📦" items={physicalHoldings} fixedPredDef={{ forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} />
+                    <CollapsibleEdgeBlock {...edgeContext} title="Conceptual Semantics" icon="🔗" items={conceptualSemantics} />
+                    <CollapsibleEdgeBlock {...edgeContext} title="Digital Embodiments" icon="🖼️" items={digitalArtifacts} hideBadge />
+                    <CollapsibleEdgeBlock {...edgeContext} title="Media Appearances" icon="📸" items={mediaAppearances} />
+                    <CollapsibleEdgeBlock {...edgeContext} title="Contained In (Locations & Collections)" icon="📥" items={containedIn} fixedPredDef={{ forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }} />
+                    <CollapsibleEdgeBlock {...edgeContext} title="Contents & Items" icon="📥" items={containsItems} fixedPredDef={{ forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }} />
+                  </>
+                )}
+
+                {/* --- B. PHYSICAL PARITY --- */}
+                {isPhysical && (
+                  <>
+                    <CollapsibleEdgeBlock {...edgeContext} title="Bridged Concept" icon="💡" items={bridgedConcepts} hideBadge fixedPredDef={{ forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} />
+                    {propertiesBlock}
+                    <CollapsibleEdgeBlock {...edgeContext} title="Conceptual Semantics" icon="🔗" items={conceptualSemantics} />
+                    <CollapsibleEdgeBlock {...edgeContext} title="Digital Embodiments" icon="🖼️" items={digitalArtifacts} hideBadge />
+                    <CollapsibleEdgeBlock {...edgeContext} title="Media Appearances" icon="📸" items={mediaAppearances} />
+                    <CollapsibleEdgeBlock {...edgeContext} title="Contained In (Locations & Collections)" icon="📥" items={containedIn} fixedPredDef={{ forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }} />
+                    <CollapsibleEdgeBlock {...edgeContext} title="Contents & Items" icon="📥" items={containsItems} fixedPredDef={{ forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }} />
+                  </>
+                )}
+
+                {/* --- C. MEDIA PARITY --- */}
+                {isMedia && (
+                  <>
+                    <CollapsibleEdgeBlock {...edgeContext} title="Bridged Concept" icon="💡" items={bridgedConcepts} hideBadge fixedPredDef={{ forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} />
+                    <CollapsibleEdgeBlock {...edgeContext} title="Physical Source Material" icon="📦" items={physicalSources} hideBadge fixedPredDef={{ forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} />
+                    {viewerBlock}
+                    {propertiesBlock}
+                    <CollapsibleEdgeBlock {...edgeContext} title="Identified Subjects & Semantics" icon="📍" items={conceptualSemantics} />
+                    <CollapsibleEdgeBlock {...edgeContext} title="Contained In (Locations & Collections)" icon="📥" items={containedIn} fixedPredDef={{ forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }} />
+                  </>
+                )}
+
               </div>
             )}
           </div>

@@ -16,7 +16,7 @@ Keep your dictionaries small, broad, and strictly defined.
 
 ## 2. Curating "Kinds" (Identity Classifications)
 
-A `Kind` is the highest-level bucket for an abstract Concept or Identity. (Remember: Physical Items and Digital Media do not use Kinds; they are categorized by their physical reality or file format).
+A `Kind` is the highest-level bucket for an abstract Concept or Identity. (Remember: Physical Items and Digital Media do not use user-curated Kinds; they are strictly categorized by their system formats, like `Physical Container` or `Image`).
 
 ### A. Finding the Right Level of Granularity
 
@@ -85,7 +85,15 @@ Some relationships are identical in both directions. Check the "Is Symmetric" bo
 
 * **Symmetric Examples:** `married to`, `sibling of`, `collaborated with`.
 
-### D. Avoid Redundant Predicates
+### D. Universal Locators (No "Position" Predicates)
+
+**Do not create predicates just to describe a location.** Yathā has universal spatial and temporal "Locators" built natively into *every* semantic connection.
+
+* ❌ **Bad:** Creating predicates like `depicted on the left` or `appears at timestamp`.
+
+* ✅ **Good:** Assert `depicts`, and simply type "Top-left corner" or "01:24" into the Locator property of the edge when building the relationship.
+
+### E. Avoid Redundant Predicates
 
 Before adding a new predicate, check if an existing one already covers the meaning.
 
@@ -93,7 +101,7 @@ Before adding a new predicate, check if an existing one already covers the meani
 
 * In a graph, the context often does the heavy lifting: `[Person] -> created -> [Book]` obviously implies writing. Keep your vocabulary lean.
 
-### E. Restricting Layers & Setting Defaults (The Magic Feature)
+### F. Restricting Layers & Setting Defaults (The Magic Feature)
 
 When you create a Predicate, you can configure exactly what layers are allowed to be the Source or Target. **This directly programs the Universal Builder UI.**
 

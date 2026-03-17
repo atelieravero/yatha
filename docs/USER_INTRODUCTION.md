@@ -38,9 +38,9 @@ Yathā forces you to separate the *Concept* from the *Custody token*. Everything
 
 ### Weaving the Web
 
-Instead of thinking about "data entry," try to approach Yathā like you are building a web of connections. When you bring something into the system, you don't need to describe everything about its meaning all at once. 
+Instead of thinking about "data entry," try to approach Yathā like you are building a web of connections. When you bring something into the system, you don't need to describe everything about its meaning all at once.
 
-You simply place the entity on the board and draw lines to what it relates to. 
+You simply place the entity on the board and draw lines to what it relates to.
 
 For example, you might mint an Identity for *Abraham Lincoln*. Later, when you upload a digital scan of a photograph, you just connect that image to Lincoln with a line that says `depicts`. If you eventually acquire a physical copy of that photo, you can map that too. The abstract concept of the person remains pristine and singular at the center of your graph, while your actual physical and digital artifacts naturally orbit around it.
 
@@ -53,3 +53,23 @@ As you start exploring your archive, keep these few mental shifts in mind:
 2. **Embrace the unknown.** It is completely okay to upload dozens of photos or documents and leave them floating without any connections. In an archive, an unidentified artifact is just an honest reflection of reality. You can safely map them into your web later when you discover their context.
 
 3. **Experiment freely.** Archiving can sometimes feel permanent and daunting, but Yathā is built with an immutable Event Ledger. Every adjustment, edit, or retraction you make is safely saved as a historical snapshot. You are free to organically reshape your graph at any time—you can always rewind history if you change your mind.
+
+## Your Data, Your Choice: How Yathā is Hosted
+
+Unlike traditional software that traps your information behind a single company's wall, Yathā separates the software from the data. While we always maintain the visual **Workspace** (the app you interact with) so you never have to worry about software updates, you have absolute control over the balance between **convenience** and **privacy** for your actual information.
+
+Think of your archive in three parts:
+
+1. **The Workspace:** The visual interface you interact with every day.
+
+2. **The Database:** The text-based memory that remembers all your concepts, tags, notes, and how everything connects together.
+
+3. **The Media Vault:** The heavy-duty storage where your actual high-resolution images, videos, and documents live.
+
+Because the data is kept separate from the Workspace app, you can choose exactly how you want your archive to run behind the scenes:
+
+* **Maximum Convenience (Fully Managed):** We host and manage both the Database and the Media Vault for you. You simply log in and start archiving immediately without worrying about any underlying setup.
+
+* **The Middle Ground (Private Media Vault):** We run the Database, but you connect your own private Media Vault. This is ideal if you have a massive collection of high-resolution files and want to retain total physical ownership of your digital media assets, while letting us manage the complex web of text data and relationships.
+
+* **Maximum Privacy (Private Vault & Database):** You connect both your own private Database and your own Media Vault. In this setup, every single piece of text, every tag, and every file lives entirely on your own secure storage. Our Workspace simply acts as a private window into your data, offering absolute data sovereignty for highly sensitive collections.
