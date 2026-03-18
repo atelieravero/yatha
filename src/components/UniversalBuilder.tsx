@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
-import { assertEdge, createNode, getUploadTicket, attachFileToNode, checkDuplicateArtifact, createPredicate, getExactMatchNode, restoreNode } from "@/app/actions";
+import { assertEdge, createNode, getUploadTicket, attachFileToNode, checkDuplicateArtifact, createPredicate, getExactMatchNode, restoreNode, fetchUrlMetadata, updateNodeProperties } from "@/app/actions";
 import { SYSTEM_PREDICATES } from "@/db/schema";
 import { getInferredHint } from "@/lib/dateParser";
 import { getNodeDisplay } from "@/lib/nodeUtils";
@@ -81,8 +81,13 @@ export default function UniversalBuilder({
   const [mintLabel, setMintLabel] = useState("");
   const [mintKind, setMintKind] = useState(""); // Only used for Identity
   const [file, setFile] = useState<File | null>(null);
+  const [linkUrl, setLinkUrl] = useState("");
   const [payloadHash, setPayloadHash] = useState("");
   const [isDragging, setIsDragging] = useState(false);
+  
+  // Auto-Fetch State
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [urlDescription, setUrlDescription] = useState("");
   
   // Dedupe State
   const [duplicateFound, setDuplicateFound] = useState<MinimalNode | null>(null);
@@ -114,6 +119,7 @@ export default function UniversalBuilder({
       setMintLabel("");
       setMintKind("");
       setFile(null);
+      setLinkUrl("");
       setPayloadHash("");
       setDuplicateFound(null);
       setSelectedPredicateId("");
@@ -127,6 +133,8 @@ export default function UniversalBuilder({
       setNewPredReverse("");
       setIsPredSymmetric(false);
       setIsDragging(false);
+      setIsAnalyzing(false);
+      setUrlDescription("");
     }
   }, [isOpen, config.mode]);
 
@@ -264,7 +272,11 @@ export default function UniversalBuilder({
   const handleCreateNewClick = () => {
     if (effectiveGateways.length === 1) {
       setActiveGateway(effectiveGateways[0]);
-      setMintLabel(searchTerm);
+      if (effectiveGateways[0] === 'URL') {
+        setLinkUrl(searchTerm);
+      } else {
+        setMintLabel(searchTerm);
+      }
       if (effectiveGateways[0] === 'IDENTITY') preselectDefaultKind();
       setStep('FORM');
     } else {
@@ -274,13 +286,17 @@ export default function UniversalBuilder({
 
   const handleGatewaySelect = (gateway: Gateway) => {
     setActiveGateway(gateway);
-    setMintLabel(searchTerm);
+    if (gateway === 'URL') {
+      setLinkUrl(searchTerm);
+    } else {
+      setMintLabel(searchTerm);
+    }
     if (gateway === 'IDENTITY') preselectDefaultKind();
     setStep('FORM');
   };
 
   // --------------------------------------------------------------------------
-  // DRAG & DROP HANDLERS
+  // DRAG & DROP & URL HANDLERS
   // --------------------------------------------------------------------------
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); };
   const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); };
@@ -293,6 +309,28 @@ export default function UniversalBuilder({
     if (droppedFile) {
       setFile(droppedFile);
       setMintLabel(droppedFile.name);
+    }
+  };
+
+  const handleAnalyzeUrl = async () => {
+    if (!linkUrl.trim()) return;
+    setIsAnalyzing(true);
+    
+    try {
+      const metadata = await fetchUrlMetadata(linkUrl.trim());
+      if (metadata.title) {
+        setMintLabel(metadata.title);
+      } else {
+        setMintLabel(linkUrl.trim());
+      }
+      
+      if (metadata.description) {
+        setUrlDescription(metadata.description);
+      }
+    } catch (e) {
+      setMintLabel(linkUrl.trim());
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
@@ -323,9 +361,15 @@ export default function UniversalBuilder({
           return;
         }
       } else if (activeGateway === 'URL') {
-        let hash = mintLabel.trim();
+        let hash = linkUrl.trim();
         const ytMatch = hash.match(/(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
-        if (ytMatch && ytMatch[1]) hash = `youtube:${ytMatch[1]}`;
+        const wikiMatch = hash.match(/https?:\/\/([a-z\-]+)\.(?:m\.)?wikipedia\.org\/wiki\/([^#?]+)/);
+        
+        if (ytMatch && ytMatch[1]) {
+          hash = `youtube:${ytMatch[1]}`;
+        } else if (wikiMatch && wikiMatch[1] && wikiMatch[2]) {
+          hash = `wikipedia:${wikiMatch[1]}:${wikiMatch[2]}`;
+        }
         
         setPayloadHash(hash);
         const existing = await checkDuplicateArtifact(hash);
@@ -353,18 +397,15 @@ export default function UniversalBuilder({
       const forward = newPredForward.toLowerCase().trim();
       const reverse = isPredSymmetric ? forward : newPredReverse.toLowerCase().trim();
       
-      const newId = await createPredicate(forward, reverse, isPredSymmetric);
+      await createPredicate(forward, reverse, isPredSymmetric);
       
-      if (newId) {
-        setSelectedPredicateId(newId);
-        setSelectedPredicateLabel(forward); // Optimistically set the label for the UI
-        setStep('SEARCH');
-      }
-
       setIsCreatingPredicate(false);
       setNewPredForward("");
       setNewPredReverse("");
       setIsPredSymmetric(false);
+      // Since createPredicate returns void, we stay on the PREDICATE step
+      // allowing the user to select their newly created verb from the refreshed dropdown.
+      setStep('PREDICATE');
     });
   };
 
@@ -387,8 +428,13 @@ export default function UniversalBuilder({
           await attachFileToNode(finalTargetId, fileUrl, file.type, file.size, payloadHash);
         } 
         else if (activeGateway === 'URL') {
-          finalTargetId = await createNode(mintLabel.trim(), "MEDIA", null);
-          await attachFileToNode(finalTargetId, payloadHash.startsWith('youtube:') ? '' : mintLabel.trim(), 'text/html', 0, payloadHash);
+          finalTargetId = await createNode(mintLabel.trim() || linkUrl.trim(), "MEDIA", null);
+          await attachFileToNode(finalTargetId, payloadHash.startsWith('youtube:') || payloadHash.startsWith('wikipedia:') ? '' : linkUrl.trim(), 'text/html', 0, payloadHash);
+          
+          // Bonus: Save extracted Open Graph description to properties!
+          if (urlDescription) {
+             await updateNodeProperties(finalTargetId, { notes: urlDescription });
+          }
         }
       }
 
@@ -720,10 +766,36 @@ export default function UniversalBuilder({
                   )}
 
                   {activeGateway === 'URL' && (
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase mb-1">Web Address / URL</label>
-                      <input type="url" autoFocus onFocus={e => e.target.select()} placeholder="https://" value={mintLabel} onChange={e => setMintLabel(e.target.value)} className="w-full p-2.5 text-sm border border-gray-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2 transition-colors shadow-sm" />
-                      <p className="text-[10px] text-gray-400 dark:text-zinc-500 font-medium">YouTube URLs will be automatically detected and converted into playable iframes.</p>
+                    <div className="space-y-3">
+                      <input 
+                        type="url" 
+                        autoFocus 
+                        onFocus={e => e.target.select()} 
+                        placeholder="https://..." 
+                        value={linkUrl} 
+                        onChange={e => setLinkUrl(e.target.value)} 
+                        disabled={isPending || isAnalyzing}
+                        className="w-full p-2.5 text-sm border border-gray-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors shadow-sm" 
+                      />
+                      <button 
+                        onClick={handleAnalyzeUrl} 
+                        disabled={!linkUrl || isAnalyzing || isPending}
+                        className="w-full py-1.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-bold text-xs uppercase tracking-widest rounded hover:bg-blue-200 dark:hover:bg-blue-900/60 transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+                      >
+                        {isAnalyzing ? "Analyzing..." : "Analyze Link →"}
+                      </button>
+
+                      {(linkUrl || mintLabel) && (
+                         <input 
+                           type="text" 
+                           placeholder="Artifact Title (Optional)..." 
+                           value={mintLabel} 
+                           onChange={e => setMintLabel(e.target.value)} 
+                           disabled={isPending || isAnalyzing}
+                           className="w-full p-2.5 text-sm border border-gray-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors shadow-sm" 
+                         />
+                      )}
+                      <p className="text-[10px] text-gray-400 dark:text-zinc-500 font-medium leading-relaxed">YouTube and Wikipedia URLs will be automatically detected and standardized.</p>
                     </div>
                   )}
 
@@ -763,7 +835,7 @@ export default function UniversalBuilder({
                     {!duplicateFound && (
                       <button 
                         onClick={processFormSubmit} 
-                        disabled={(activeGateway === 'IDENTITY' && (!mintLabel || !mintKind)) || (activeGateway === 'PHYSICAL' && !mintLabel) || (activeGateway === 'FILE' && !file) || (activeGateway === 'URL' && !mintLabel)}
+                        disabled={isPending || isAnalyzing || (activeGateway === 'IDENTITY' && (!mintLabel || !mintKind)) || (activeGateway === 'PHYSICAL' && !mintLabel) || (activeGateway === 'FILE' && !file) || (activeGateway === 'URL' && !linkUrl)}
                         className="px-5 py-2 bg-blue-600 text-white text-xs font-bold rounded shadow-sm disabled:opacity-50 cursor-pointer hover:bg-blue-700 transition-colors"
                       >
                         Continue →

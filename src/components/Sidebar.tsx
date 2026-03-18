@@ -4,7 +4,7 @@ import { useState, useEffect, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signOut } from "next-auth/react";
 import Link from "next/link";
-import { createNode, searchGraphNodes, checkDuplicateArtifact, getUploadTicket, attachFileToNode, getExactMatchNode, restoreNode } from "@/app/actions";
+import { createNode, searchGraphNodes, checkDuplicateArtifact, getUploadTicket, attachFileToNode, getExactMatchNode, restoreNode, fetchUrlMetadata, updateNodeProperties } from "@/app/actions";
 import { getNodeDisplay } from "@/lib/nodeUtils";
 
 type Node = {
@@ -90,6 +90,10 @@ export default function Sidebar({
   const [isPending, startTransition] = useTransition();
   const [isDragging, setIsDragging] = useState(false);
 
+  // Auto-Fetch State
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [urlDescription, setUrlDescription] = useState("");
+
   const handleCloseMinting = () => {
     setActiveGateway(null);
     setMintLabel("");
@@ -99,6 +103,8 @@ export default function Sidebar({
     setPayloadHash("");
     setDuplicateFound(null);
     setIsDragging(false);
+    setIsAnalyzing(false);
+    setUrlDescription("");
   };
 
   // --- Drag & Drop Handlers ---
@@ -113,6 +119,29 @@ export default function Sidebar({
     if (droppedFile) {
       setFile(droppedFile);
       setMintLabel(droppedFile.name);
+    }
+  };
+
+  // --- Auto-Fetch Metadata Handler ---
+  const handleAnalyzeUrl = async () => {
+    if (!linkUrl.trim()) return;
+    setIsAnalyzing(true);
+    
+    try {
+      const metadata = await fetchUrlMetadata(linkUrl.trim());
+      if (metadata.title) {
+        setMintLabel(metadata.title);
+      } else {
+        setMintLabel(linkUrl.trim()); // Graceful degradation
+      }
+      
+      if (metadata.description) {
+        setUrlDescription(metadata.description);
+      }
+    } catch (e) {
+      setMintLabel(linkUrl.trim());
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
@@ -155,14 +184,31 @@ export default function Sidebar({
       startTransition(async () => {
          if (linkUrl) {
            let hash = linkUrl.trim();
+           
+           // Standardize YouTube URLs
            const ytMatch = hash.match(/(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
-           if (ytMatch && ytMatch[1]) hash = `youtube:${ytMatch[1]}`;
+           // Standardize Wikipedia URLs
+           const wikiMatch = hash.match(/https?:\/\/([a-z\-]+)\.(?:m\.)?wikipedia\.org\/wiki\/([^#?]+)/);
+           
+           if (ytMatch && ytMatch[1]) {
+             hash = `youtube:${ytMatch[1]}`;
+           } else if (wikiMatch && wikiMatch[1] && wikiMatch[2]) {
+             hash = `wikipedia:${wikiMatch[1]}:${wikiMatch[2]}`;
+           }
            
            const existing = await checkDuplicateArtifact(hash);
            if (existing) { setDuplicateFound(existing as Node); return; }
 
-           const newId = await createNode(mintLabel.trim() || linkUrl.trim(), "MEDIA", null);
-           await attachFileToNode(newId, hash.startsWith('youtube:') ? '' : linkUrl.trim(), 'text/html', 0, hash);
+           const finalLabel = mintLabel.trim() || linkUrl.trim();
+           const newId = await createNode(finalLabel, "MEDIA", null);
+           
+           await attachFileToNode(newId, (hash.startsWith('youtube:') || hash.startsWith('wikipedia:')) ? '' : linkUrl.trim(), 'text/html', 0, hash);
+           
+           // Bonus: Save extracted Open Graph description to properties!
+           if (urlDescription) {
+             await updateNodeProperties(newId, { notes: urlDescription });
+           }
+
            handleCloseMinting();
            router.push(`/?node=${newId}`);
            setIsMobileMenuOpen(false);
@@ -192,7 +238,8 @@ export default function Sidebar({
     if (layerNodes.length === 0) return null;
     return (
       <div className="mb-6">
-        <h3 className="px-4 py-2 text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-widest mb-1 sticky top-0 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md z-10 border-b border-gray-100 dark:border-zinc-800/50 shadow-sm transition-colors">
+        {/* Edge-to-edge sticky header with backdrop blur to prevent text bleed */}
+        <h3 className="px-4 py-2 -mx-4 text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-widest mb-1 sticky top-0 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md z-10 border-b border-gray-100 dark:border-zinc-800/50 shadow-sm transition-colors">
           {title}
         </h3>
         <div className="space-y-0.5 px-2">
@@ -357,9 +404,32 @@ export default function Sidebar({
 
               {activeGateway === 'URL' && (
                 <div className="space-y-3">
-                  <input type="url" autoFocus placeholder="https://..." value={linkUrl} onChange={e => setLinkUrl(e.target.value)} disabled={isPending} className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors" />
-                  {linkUrl && (
-                     <input type="text" placeholder="Artifact Title (Optional)..." value={mintLabel} onChange={e => setMintLabel(e.target.value)} disabled={isPending} className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors" />
+                  <input 
+                    type="url" 
+                    autoFocus 
+                    placeholder="https://..." 
+                    value={linkUrl} 
+                    onChange={e => setLinkUrl(e.target.value)} 
+                    disabled={isPending || isAnalyzing} 
+                    className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors" 
+                  />
+                  <button 
+                    onClick={handleAnalyzeUrl} 
+                    disabled={!linkUrl || isAnalyzing || isPending}
+                    className="w-full py-1.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-bold text-xs uppercase tracking-widest rounded hover:bg-blue-200 dark:hover:bg-blue-900/60 transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+                  >
+                    {isAnalyzing ? "Analyzing..." : "Analyze Link →"}
+                  </button>
+
+                  {(linkUrl || mintLabel) && (
+                     <input 
+                       type="text" 
+                       placeholder="Artifact Title (Optional)..." 
+                       value={mintLabel} 
+                       onChange={e => setMintLabel(e.target.value)} 
+                       disabled={isPending || isAnalyzing} 
+                       className="w-full p-2 text-sm border border-blue-200 dark:border-blue-800/50 rounded-md bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-colors" 
+                     />
                   )}
                 </div>
               )}
@@ -381,8 +451,8 @@ export default function Sidebar({
               {!duplicateFound && (
                 <button 
                   onClick={executeGlobalMint} 
-                  disabled={isPending || (activeGateway === 'IDENTITY' && (!mintLabel || !mintKind)) || (activeGateway === 'PHYSICAL' && !mintLabel) || (activeGateway === 'FILE' && !file) || (activeGateway === 'URL' && !linkUrl)}
-                  className="w-full py-2 bg-blue-600 dark:bg-blue-500 text-white text-xs font-bold uppercase tracking-widest rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 shadow-sm transition-colors cursor-pointer"
+                  disabled={isPending || isAnalyzing || (activeGateway === 'IDENTITY' && (!mintLabel || !mintKind)) || (activeGateway === 'PHYSICAL' && !mintLabel) || (activeGateway === 'FILE' && !file) || (activeGateway === 'URL' && !linkUrl)}
+                  className="w-full py-2 bg-blue-600 dark:bg-blue-500 text-white text-xs font-bold uppercase tracking-widest rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 shadow-sm transition-colors cursor-pointer mt-2"
                 >
                   {isPending ? "Processing..." : activeGateway === 'FILE' || activeGateway === 'URL' ? "Upload & Mint" : "Mint Record"}
                 </button>
@@ -392,17 +462,17 @@ export default function Sidebar({
         )}
 
         {/* DIRECTORY LISTING */}
-        <div className="flex-1 overflow-y-auto bg-white dark:bg-zinc-900 transition-colors py-2">
+        <div className="flex-1 overflow-y-auto bg-white dark:bg-zinc-900 transition-colors px-4 pb-4">
           {searchQuery.trim() && displayNodes.length === 0 ? (
-            <div className="text-center p-4 text-gray-500 dark:text-zinc-400 text-sm italic">
+            <div className="text-center py-8 text-gray-500 dark:text-zinc-400 text-sm italic">
               No records found for "{searchQuery}".
             </div>
           ) : (
-            <>
+            <div className="py-2">
               {renderNodeGroup("Identities & Concepts", identityNodes)}
               {renderNodeGroup("Physical Items", physicalNodes)}
               {renderNodeGroup("Digital Media", mediaNodes)}
-            </>
+            </div>
           )}
         </div>
 
