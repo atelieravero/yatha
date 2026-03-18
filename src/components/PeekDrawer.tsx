@@ -3,9 +3,9 @@
 import { useState, useEffect } from "react";
 import { getQuickContext } from "@/app/actions";
 import { getMediaDetails } from "@/lib/mediaUtils";
-import CollapsibleEdgeBlock from "./CollapsibleEdgeBlock";
 import { groupEdges } from "@/lib/edgeGrouping";
 import { getNodeDisplay } from "@/lib/nodeUtils";
+import NodeLayoutEngine from "./NodeLayoutEngine";
 
 export default function PeekDrawer({
   peekNode,
@@ -58,10 +58,6 @@ export default function PeekDrawer({
   // EDGE GROUPING
   // --------------------------------------------------------------------------
   const groups = groupEdges(contextData.edges || [], peekNode, contextData.relatedNodes || []);
-  const { physicalHoldings, digitalArtifacts, mediaAppearances, conceptualSemantics, bridgedConcepts, physicalSources, containedIn, containsItems } = groups;
-
-  const isIdentity = peekNode.layer === 'IDENTITY';
-  const isPhysical = peekNode.layer === 'PHYSICAL';
   const isMedia = peekNode.layer === 'MEDIA';
 
   // Base props required by all edge blocks in the drawer.
@@ -170,47 +166,13 @@ export default function PeekDrawer({
                 <span className="text-lg">⏳</span> Loading context...
               </div>
             ) : (
-              <div className="flex flex-col">
-                
-                {/* --- A. IDENTITY PARITY --- */}
-                {isIdentity && (
-                  <>
-                    {propertiesBlock}
-                    <CollapsibleEdgeBlock {...edgeContext} title="Physical Holdings" icon="📦" items={physicalHoldings} fixedPredDef={{ forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} />
-                    <CollapsibleEdgeBlock {...edgeContext} title="Conceptual Semantics" icon="🔗" items={conceptualSemantics} />
-                    <CollapsibleEdgeBlock {...edgeContext} title="Digital Embodiments" icon="🖼️" items={digitalArtifacts} hideBadge />
-                    <CollapsibleEdgeBlock {...edgeContext} title="Media Appearances" icon="📸" items={mediaAppearances} />
-                    <CollapsibleEdgeBlock {...edgeContext} title="Contained In (Locations & Collections)" icon="📥" items={containedIn} fixedPredDef={{ forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }} />
-                    <CollapsibleEdgeBlock {...edgeContext} title="Contents & Items" icon="📥" items={containsItems} fixedPredDef={{ forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }} />
-                  </>
-                )}
-
-                {/* --- B. PHYSICAL PARITY --- */}
-                {isPhysical && (
-                  <>
-                    <CollapsibleEdgeBlock {...edgeContext} title="Bridged Concept" icon="💡" items={bridgedConcepts} hideBadge fixedPredDef={{ forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} />
-                    {propertiesBlock}
-                    <CollapsibleEdgeBlock {...edgeContext} title="Conceptual Semantics" icon="🔗" items={conceptualSemantics} />
-                    <CollapsibleEdgeBlock {...edgeContext} title="Digital Embodiments" icon="🖼️" items={digitalArtifacts} hideBadge />
-                    <CollapsibleEdgeBlock {...edgeContext} title="Media Appearances" icon="📸" items={mediaAppearances} />
-                    <CollapsibleEdgeBlock {...edgeContext} title="Contained In (Locations & Collections)" icon="📥" items={containedIn} fixedPredDef={{ forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }} />
-                    <CollapsibleEdgeBlock {...edgeContext} title="Contents & Items" icon="📥" items={containsItems} fixedPredDef={{ forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }} />
-                  </>
-                )}
-
-                {/* --- C. MEDIA PARITY --- */}
-                {isMedia && (
-                  <>
-                    <CollapsibleEdgeBlock {...edgeContext} title="Bridged Concept" icon="💡" items={bridgedConcepts} hideBadge fixedPredDef={{ forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} />
-                    <CollapsibleEdgeBlock {...edgeContext} title="Physical Source Material" icon="📦" items={physicalSources} hideBadge fixedPredDef={{ forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }} />
-                    {viewerBlock}
-                    {propertiesBlock}
-                    <CollapsibleEdgeBlock {...edgeContext} title="Identified Subjects & Semantics" icon="📍" items={conceptualSemantics} />
-                    <CollapsibleEdgeBlock {...edgeContext} title="Contained In (Locations & Collections)" icon="📥" items={containedIn} fixedPredDef={{ forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }} />
-                  </>
-                )}
-
-              </div>
+              <NodeLayoutEngine
+                node={peekNode}
+                groups={groups}
+                edgeContext={edgeContext}
+                propertiesComponent={propertiesBlock}
+                mediaViewerComponent={isMedia ? viewerBlock : null}
+              />
             )}
           </div>
 
