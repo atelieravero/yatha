@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
-import { assertEdge, createNode, getUploadTicket, attachFileToNode, checkDuplicateArtifact, createPredicate, getExactMatchNode, restoreNode, fetchUrlMetadata, updateNodeProperties } from "@/app/actions";
+import { assertEdge, createNode, getUploadTicket, attachFileToNode, checkDuplicateArtifact, createPredicate, getExactMatchNode, restoreNode, fetchUrlMetadata, updateNodeProperties, checkExistingEdge } from "@/app/actions";
 import { SYSTEM_PREDICATES } from "@/db/schema";
 import { getInferredHint } from "@/lib/dateParser";
 import { getNodeDisplay } from "@/lib/nodeUtils";
@@ -70,7 +70,7 @@ export default function UniversalBuilder({
   config: BuilderConfig;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [step, setStep] = useState<'PREDICATE' | 'SEARCH' | 'GATEWAY' | 'FORM' | 'PROPERTIES' | 'EXECUTING'>('SEARCH');
+  const [step, setStep] = useState<'PREDICATE' | 'SEARCH' | 'GATEWAY' | 'FORM' | 'PROPERTIES' | 'EXECUTING' | 'ANALYZING' | 'DUPLICATE_WARNING'>('SEARCH');
   const [isPending, startTransition] = useTransition();
 
   // Search & Target State
@@ -92,6 +92,7 @@ export default function UniversalBuilder({
   
   // Dedupe State
   const [duplicateFound, setDuplicateFound] = useState<MinimalNode | null>(null);
+  const [duplicateEdgeFound, setDuplicateEdgeFound] = useState(false);
 
   // Properties State (Semantic Edges)
   const [selectedPredicateId, setSelectedPredicateId] = useState("");
@@ -123,6 +124,7 @@ export default function UniversalBuilder({
       setLinkUrl("");
       setPayloadHash("");
       setDuplicateFound(null);
+      setDuplicateEdgeFound(false);
       setSelectedPredicateId("");
       setSelectedPredicateLabel("");
       setTemporalInput("");
@@ -261,9 +263,43 @@ export default function UniversalBuilder({
     }
   };
 
-  const handleSelectExisting = (id: string) => {
+  const resolveEdgeDetails = (candidateTargetId: string) => {
+    let edgeSource = sourceNode.id;
+    let edgeTarget = candidateTargetId;
+    
+    if (config.direction === "REVERSE" && config.mode !== 'SEMANTIC') {
+      edgeSource = candidateTargetId;
+      edgeTarget = sourceNode.id;
+    }
+
+    let finalPredicate = SYSTEM_PREDICATES.CARRIES;
+    if (config.mode === 'CONTAINMENT') finalPredicate = SYSTEM_PREDICATES.CONTAINS;
+    if (config.mode === 'SEMANTIC') finalPredicate = selectedPredicateId;
+
+    if (config.mode === 'SEMANTIC' && finalPredicate.endsWith('_REV')) {
+      finalPredicate = finalPredicate.replace('_REV', '');
+      const temp = edgeSource;
+      edgeSource = edgeTarget;
+      edgeTarget = temp;
+    }
+    
+    return { edgeSource, edgeTarget, finalPredicate };
+  };
+
+  const handleSelectExisting = async (id: string) => {
     setTargetId(id);
-    proceedToPropertiesOrExecute(id); 
+    setStep('ANALYZING');
+    
+    const { edgeSource, edgeTarget, finalPredicate } = resolveEdgeDetails(id);
+    const edgeExists = await checkExistingEdge(edgeSource, edgeTarget, finalPredicate);
+    
+    if (edgeExists) {
+      setDuplicateFound(allNodes.find(n => n.id === id) as MinimalNode);
+      setDuplicateEdgeFound(true);
+      setStep('DUPLICATE_WARNING');
+    } else {
+      proceedToPropertiesOrExecute(id); 
+    }
   };
 
   const preselectDefaultKind = () => {
@@ -333,7 +369,14 @@ export default function UniversalBuilder({
     
     try {
       const metadata = await fetchUrlMetadata(rawUrl);
-      const fetchedTitle = cleanFetchedTitle(metadata.title);
+      let fetchedTitle = metadata.title || "";
+      
+      // Clean up common bot-blocked skeleton titles (like YouTube)
+      if (fetchedTitle === '- YouTube' || fetchedTitle === 'YouTube' || fetchedTitle === 'Access Denied') {
+        fetchedTitle = "";
+      } else if (fetchedTitle.endsWith(' - YouTube')) {
+        fetchedTitle = fetchedTitle.replace(' - YouTube', '').trim();
+      }
 
       if (fetchedTitle) {
         setMintLabel(fetchedTitle);
@@ -354,39 +397,52 @@ export default function UniversalBuilder({
   const processFormSubmit = async () => {
     if (!activeGateway) return;
 
+    setStep('ANALYZING');
+
     if (activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') {
       // Soft Dedupe Check (Now Alias-Aware AND Trash-Aware!)
       const exactMatch = await getExactMatchNode(mintLabel, activeGateway);
 
       if (exactMatch) {
         setDuplicateFound(exactMatch as MinimalNode);
+        
+        // Double check edge collisions!
+        const { edgeSource, edgeTarget, finalPredicate } = resolveEdgeDetails(exactMatch.id);
+        const edgeExists = await checkExistingEdge(edgeSource, edgeTarget, finalPredicate);
+        setDuplicateEdgeFound(edgeExists);
+        
+        setStep('DUPLICATE_WARNING');
         return; 
       }
       proceedToPropertiesOrExecute();
     } 
     else if (activeGateway === 'FILE' || activeGateway === 'URL') {
       // Hard Dedupe Check
+      let existing = null;
       if (activeGateway === 'FILE' && file) {
         const buffer = await file.arrayBuffer();
         const hashBuf = await crypto.subtle.digest('SHA-256', buffer);
         const hex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
         setPayloadHash(hex);
-        
-        const existing = await checkDuplicateArtifact(hex);
-        if (existing) {
-          setDuplicateFound(existing as MinimalNode);
-          return;
-        }
+        existing = await checkDuplicateArtifact(hex);
       } else if (activeGateway === 'URL') {
         const { hash } = standardizeUrlMetadata(linkUrl);
         setPayloadHash(hash);
-        
-        const existing = await checkDuplicateArtifact(hash);
-        if (existing) {
-          setDuplicateFound(existing as MinimalNode);
-          return;
-        }
+        existing = await checkDuplicateArtifact(hash);
       }
+
+      if (existing) {
+        setDuplicateFound(existing as MinimalNode);
+        
+        // Double check edge collisions!
+        const { edgeSource, edgeTarget, finalPredicate } = resolveEdgeDetails(existing.id);
+        const edgeExists = await checkExistingEdge(edgeSource, edgeTarget, finalPredicate);
+        setDuplicateEdgeFound(edgeExists);
+        
+        setStep('DUPLICATE_WARNING');
+        return;
+      }
+      
       proceedToPropertiesOrExecute();
     }
   };
@@ -452,25 +508,7 @@ export default function UniversalBuilder({
       if (!finalTargetId) return setIsOpen(false);
 
       // Phase 2: GRAPH PHYSICS & LINKING
-      let edgeSource = sourceNode.id;
-      let edgeTarget = finalTargetId;
-      
-      if (config.direction === "REVERSE" && config.mode !== 'SEMANTIC') {
-        edgeSource = finalTargetId;
-        edgeTarget = sourceNode.id;
-      }
-
-      let finalPredicate = SYSTEM_PREDICATES.CARRIES;
-      if (config.mode === 'CONTAINMENT') finalPredicate = SYSTEM_PREDICATES.CONTAINS;
-      if (config.mode === 'SEMANTIC') finalPredicate = selectedPredicateId;
-
-      if (config.mode === 'SEMANTIC' && finalPredicate.endsWith('_REV')) {
-        finalPredicate = finalPredicate.replace('_REV', '');
-        const temp = edgeSource;
-        edgeSource = edgeTarget;
-        edgeTarget = temp;
-      }
-
+      const { edgeSource, edgeTarget, finalPredicate } = resolveEdgeDetails(finalTargetId);
       const edgeProperties = locator.trim() ? { locator: locator.trim() } : {};
 
       await assertEdge(
@@ -810,17 +848,69 @@ export default function UniversalBuilder({
                     </div>
                   )}
 
-                  {/* TRASH-AWARE DEDUPLICATION WARNING */}
-                  {duplicateFound && (
-                    <div className={`mt-5 p-4 border rounded-lg transition-colors shadow-sm ${duplicateFound.isActive === false ? 'bg-gray-100 dark:bg-zinc-800 border-gray-300 dark:border-zinc-700' : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50'}`}>
+                  <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-100 dark:border-zinc-800">
+                    <button onClick={() => setStep(effectiveGateways.length === 1 ? 'SEARCH' : 'GATEWAY')} className="text-xs font-medium text-gray-500 dark:text-zinc-400 hover:underline cursor-pointer">← Back</button>
+                    <button 
+                      onClick={processFormSubmit} 
+                      disabled={isPending || isAnalyzing || (activeGateway === 'IDENTITY' && (!mintLabel || !mintKind)) || (activeGateway === 'PHYSICAL' && !mintLabel) || (activeGateway === 'FILE' && !file) || (activeGateway === 'URL' && !linkUrl)}
+                      className="px-5 py-2 bg-blue-600 text-white text-xs font-bold rounded shadow-sm disabled:opacity-50 cursor-pointer hover:bg-blue-700 transition-colors"
+                    >
+                      Continue →
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 3.5: DUPLICATE & COLLISION WARNING */}
+              {step === 'DUPLICATE_WARNING' && duplicateFound && (
+                <div className="animate-in slide-in-from-right-2 p-5 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg shadow-sm transition-colors">
+                   <div className={`p-4 border rounded-lg transition-colors shadow-sm ${duplicateFound.isActive === false ? 'bg-gray-100 dark:bg-zinc-800 border-gray-300 dark:border-zinc-700' : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50'}`}>
+                      
+                      {/* TRASH WARNING */}
                       {duplicateFound.isActive === false ? (
                         <>
                           <p className="text-xs font-bold text-gray-800 dark:text-zinc-200 mb-1 flex items-center gap-1.5"><span>🗑️</span> Found in Trash</p>
-                          <p className="text-xs text-gray-600 dark:text-zinc-400 mb-3">"{duplicateFound.label}" exists, but it was moved to the trash.</p>
-                          <button onClick={handleRestoreFromTrash} disabled={isPending} className="w-full py-2 bg-gray-800 dark:bg-zinc-700 text-white text-xs font-bold rounded hover:bg-gray-900 dark:hover:bg-zinc-600 cursor-pointer shadow-sm transition-colors">
-                            {isPending ? "..." : "Restore & Use Record"}
-                          </button>
+                          <p className="text-xs text-gray-600 dark:text-zinc-400 mb-4">"{duplicateFound.label}" exists, but it was moved to the trash.</p>
+                          <div className="flex gap-2">
+                              <button onClick={() => setStep(activeGateway ? 'FORM' : 'SEARCH')} className="flex-1 py-2 bg-white dark:bg-zinc-900 text-gray-700 dark:text-zinc-300 text-xs font-bold rounded hover:bg-gray-50 dark:hover:bg-zinc-800 cursor-pointer shadow-sm border border-gray-200 dark:border-zinc-700 transition-colors">Cancel</button>
+                              <button onClick={handleRestoreFromTrash} disabled={isPending} className="flex-1 py-2 bg-gray-800 dark:bg-zinc-700 text-white text-xs font-bold rounded hover:bg-gray-900 dark:hover:bg-zinc-600 cursor-pointer shadow-sm transition-colors">
+                                {isPending ? "..." : "Restore & Use"}
+                              </button>
+                          </div>
                         </>
+                      
+                      /* EDGE DUPLICATE WARNING */
+                      ) : duplicateEdgeFound ? (
+                        <>
+                          <p className="text-xs font-bold text-amber-800 dark:text-amber-400 mb-1 flex items-center gap-1.5"><span>⚠️</span> Link Already Exists</p>
+                          <p className="text-xs text-amber-700 dark:text-amber-500 mb-4">
+                            You already have a relationship connecting <strong>{sourceNode.label}</strong> to <strong>{duplicateFound.label}</strong>.
+                          </p>
+                          <div className="flex flex-col gap-2">
+                            <button onClick={() => setStep(activeGateway ? 'FORM' : 'SEARCH')} className="w-full py-2 bg-white dark:bg-zinc-900 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-700/50 text-xs font-bold rounded shadow-sm hover:bg-amber-50 dark:hover:bg-amber-900/30 cursor-pointer transition-colors">
+                              Cancel & Go Back
+                            </button>
+                            <button onClick={() => proceedToPropertiesOrExecute(duplicateFound.id)} className="w-full py-2 bg-amber-600 dark:bg-amber-700 text-white text-xs font-bold rounded shadow-sm hover:bg-amber-700 dark:hover:bg-amber-600 cursor-pointer transition-colors">
+                              Create Duplicate Link Anyway
+                            </button>
+                            
+                            {/* Option 3: Only possible if they are allowed to mint new identities/physical nodes here */}
+                            {(!activeGateway || activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
+                              <button onClick={() => {
+                                if (!activeGateway) {
+                                  setSearchTerm(duplicateFound.label);
+                                  setStep('GATEWAY'); // Switch to minting flow
+                                } else {
+                                  proceedToPropertiesOrExecute(); // Proceed with the current minting flow
+                                }
+                              }} className="w-full py-2 bg-gray-800 dark:bg-zinc-700 text-white text-xs font-bold rounded shadow-sm hover:bg-gray-900 dark:hover:bg-zinc-600 cursor-pointer transition-colors">
+                                Mint New Duplicate Record & Link
+                              </button>
+                            )}
+                          </div>
+                        </>
+
+                      /* NODE DUPLICATE WARNING (Only node matches, no edge collision) */
                       ) : (
                         <>
                           <p className="text-xs font-bold text-amber-800 dark:text-amber-400 mb-1 flex items-center gap-1.5"><span>⚠️</span> Exact Match Found</p>
@@ -831,28 +921,17 @@ export default function UniversalBuilder({
                             )} already exists.
                           </p>
                           <div className="flex gap-2">
-                            <button onClick={() => handleSelectExisting(duplicateFound.id)} className="flex-1 py-2 bg-amber-600 dark:bg-amber-700 text-white text-xs font-bold rounded shadow-sm hover:bg-amber-700 dark:hover:bg-amber-600 cursor-pointer transition-colors">Use Existing</button>
+                            <button onClick={() => proceedToPropertiesOrExecute(duplicateFound.id)} className="flex-1 py-2 bg-amber-600 dark:bg-amber-700 text-white text-xs font-bold rounded shadow-sm hover:bg-amber-700 dark:hover:bg-amber-600 cursor-pointer transition-colors">Use Existing</button>
                             {(activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
                               <button onClick={() => proceedToPropertiesOrExecute()} className="flex-1 py-2 bg-white dark:bg-zinc-900 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-700/50 text-xs font-bold rounded shadow-sm hover:bg-amber-50 dark:hover:bg-amber-900/30 cursor-pointer transition-colors">Mint Duplicate</button>
                             )}
                           </div>
+                          <button onClick={() => setStep(activeGateway ? 'FORM' : 'SEARCH')} className="w-full py-2 mt-2 text-amber-800 dark:text-amber-400 text-xs font-bold hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded transition-colors cursor-pointer">
+                            Cancel
+                          </button>
                         </>
                       )}
-                    </div>
-                  )}
-
-                  <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-100 dark:border-zinc-800">
-                    <button onClick={() => setStep(effectiveGateways.length === 1 ? 'SEARCH' : 'GATEWAY')} className="text-xs font-medium text-gray-500 dark:text-zinc-400 hover:underline cursor-pointer">← Back</button>
-                    {!duplicateFound && (
-                      <button 
-                        onClick={processFormSubmit} 
-                        disabled={isPending || isAnalyzing || (activeGateway === 'IDENTITY' && (!mintLabel || !mintKind)) || (activeGateway === 'PHYSICAL' && !mintLabel) || (activeGateway === 'FILE' && !file) || (activeGateway === 'URL' && !linkUrl)}
-                        className="px-5 py-2 bg-blue-600 text-white text-xs font-bold rounded shadow-sm disabled:opacity-50 cursor-pointer hover:bg-blue-700 transition-colors"
-                      >
-                        Continue →
-                      </button>
-                    )}
-                  </div>
+                   </div>
                 </div>
               )}
 
@@ -914,7 +993,14 @@ export default function UniversalBuilder({
                 </div>
               )}
 
-              {/* STEP 5: EXECUTING */}
+              {/* STEP 5 & 6: PROCESSING STATES */}
+              {step === 'ANALYZING' && (
+                <div className="py-12 text-center animate-in fade-in flex flex-col items-center gap-4 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg transition-colors shadow-sm">
+                  <span className="text-4xl animate-spin text-blue-600 dark:text-blue-400">⏳</span>
+                  <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest">Analyzing Graph...</p>
+                </div>
+              )}
+
               {step === 'EXECUTING' && (
                 <div className="py-12 text-center animate-in fade-in flex flex-col items-center gap-4 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg transition-colors shadow-sm">
                   <span className="text-4xl animate-spin text-blue-600 dark:text-blue-400">🌀</span>

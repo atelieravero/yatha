@@ -549,6 +549,18 @@ export async function getSecureMediaUrl(filename: string) {
 // GRAPH RELATIONSHIPS (EDGES)
 // ============================================================================
 
+export async function checkExistingEdge(sourceId: string, targetId: string, predicateId: string) {
+  const [existing] = await db.select().from(edges).where(
+    and(
+      eq(edges.sourceId, sourceId),
+      eq(edges.targetId, targetId),
+      eq(edges.predicateId, predicateId),
+      eq(edges.isActive, true) // Only care about active edges
+    )
+  );
+  return !!existing;
+}
+
 export async function assertEdge(
   sourceId: string,
   targetId: string,
