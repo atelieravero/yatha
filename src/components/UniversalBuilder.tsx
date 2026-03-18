@@ -5,6 +5,7 @@ import { assertEdge, createNode, getUploadTicket, attachFileToNode, checkDuplica
 import { SYSTEM_PREDICATES } from "@/db/schema";
 import { getInferredHint } from "@/lib/dateParser";
 import { getNodeDisplay } from "@/lib/nodeUtils";
+import { standardizeUrlMetadata, cleanFetchedTitle } from "@/lib/mediaUtils";
 
 type MinimalNode = { 
   id: string; 
@@ -327,19 +328,24 @@ export default function UniversalBuilder({
     if (!linkUrl.trim()) return;
     setIsAnalyzing(true);
     
+    const { cleanUrl } = standardizeUrlMetadata(linkUrl);
+    const rawUrl = linkUrl.trim();
+    
     try {
-      const metadata = await fetchUrlMetadata(linkUrl.trim());
-      if (metadata.title) {
-        setMintLabel(metadata.title);
+      const metadata = await fetchUrlMetadata(rawUrl);
+      const fetchedTitle = cleanFetchedTitle(metadata.title);
+
+      if (fetchedTitle) {
+        setMintLabel(fetchedTitle);
       } else {
-        setMintLabel(linkUrl.trim());
+        setMintLabel(cleanUrl);
       }
       
       if (metadata.description) {
         setUrlDescription(metadata.description);
       }
     } catch (e) {
-      setMintLabel(linkUrl.trim());
+      setMintLabel(cleanUrl);
     } finally {
       setIsAnalyzing(false);
     }
@@ -372,17 +378,9 @@ export default function UniversalBuilder({
           return;
         }
       } else if (activeGateway === 'URL') {
-        let hash = linkUrl.trim();
-        const ytMatch = hash.match(/(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
-        const wikiMatch = hash.match(/https?:\/\/([a-z\-]+)\.(?:m\.)?wikipedia\.org\/wiki\/([^#?]+)/);
-        
-        if (ytMatch && ytMatch[1]) {
-          hash = `youtube:${ytMatch[1]}`;
-        } else if (wikiMatch && wikiMatch[1] && wikiMatch[2]) {
-          hash = `wikipedia:${wikiMatch[1]}:${wikiMatch[2]}`;
-        }
-        
+        const { hash } = standardizeUrlMetadata(linkUrl);
         setPayloadHash(hash);
+        
         const existing = await checkDuplicateArtifact(hash);
         if (existing) {
           setDuplicateFound(existing as MinimalNode);
@@ -439,8 +437,10 @@ export default function UniversalBuilder({
           await attachFileToNode(finalTargetId, fileUrl, file.type, file.size, payloadHash);
         } 
         else if (activeGateway === 'URL') {
-          finalTargetId = await createNode(mintLabel.trim() || linkUrl.trim(), "MEDIA", null);
-          await attachFileToNode(finalTargetId, payloadHash.startsWith('youtube:') || payloadHash.startsWith('wikipedia:') ? '' : linkUrl.trim(), 'text/html', 0, payloadHash);
+          const { cleanUrl, hash } = standardizeUrlMetadata(linkUrl);
+          
+          finalTargetId = await createNode(mintLabel.trim() || cleanUrl, "MEDIA", null);
+          await attachFileToNode(finalTargetId, (hash.startsWith('youtube:') || hash.startsWith('wikipedia:')) ? '' : cleanUrl, 'text/html', 0, hash);
           
           // Bonus: Save extracted Open Graph description to properties!
           if (urlDescription) {

@@ -6,6 +6,7 @@ import { signOut } from "next-auth/react";
 import Link from "next/link";
 import { createNode, searchGraphNodes, checkDuplicateArtifact, getUploadTicket, attachFileToNode, getExactMatchNode, restoreNode, fetchUrlMetadata, updateNodeProperties } from "@/app/actions";
 import { getNodeDisplay } from "@/lib/nodeUtils";
+import { standardizeUrlMetadata, cleanFetchedTitle } from "@/lib/mediaUtils";
 
 type Node = {
   id: string;
@@ -127,19 +128,24 @@ export default function Sidebar({
     if (!linkUrl.trim()) return;
     setIsAnalyzing(true);
     
+    const { cleanUrl } = standardizeUrlMetadata(linkUrl);
+    const rawUrl = linkUrl.trim();
+    
     try {
-      const metadata = await fetchUrlMetadata(linkUrl.trim());
-      if (metadata.title) {
-        setMintLabel(metadata.title);
+      const metadata = await fetchUrlMetadata(rawUrl);
+      const fetchedTitle = cleanFetchedTitle(metadata.title);
+
+      if (fetchedTitle) {
+        setMintLabel(fetchedTitle);
       } else {
-        setMintLabel(linkUrl.trim()); // Graceful degradation
+        setMintLabel(cleanUrl);
       }
       
       if (metadata.description) {
         setUrlDescription(metadata.description);
       }
     } catch (e) {
-      setMintLabel(linkUrl.trim());
+      setMintLabel(cleanUrl);
     } finally {
       setIsAnalyzing(false);
     }
@@ -183,26 +189,15 @@ export default function Sidebar({
     } else if (activeGateway === 'URL') {
       startTransition(async () => {
          if (linkUrl) {
-           let hash = linkUrl.trim();
-           
-           // Standardize YouTube URLs
-           const ytMatch = hash.match(/(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
-           // Standardize Wikipedia URLs
-           const wikiMatch = hash.match(/https?:\/\/([a-z\-]+)\.(?:m\.)?wikipedia\.org\/wiki\/([^#?]+)/);
-           
-           if (ytMatch && ytMatch[1]) {
-             hash = `youtube:${ytMatch[1]}`;
-           } else if (wikiMatch && wikiMatch[1] && wikiMatch[2]) {
-             hash = `wikipedia:${wikiMatch[1]}:${wikiMatch[2]}`;
-           }
+           const { cleanUrl, hash } = standardizeUrlMetadata(linkUrl);
            
            const existing = await checkDuplicateArtifact(hash);
            if (existing) { setDuplicateFound(existing as Node); return; }
 
-           const finalLabel = mintLabel.trim() || linkUrl.trim();
+           const finalLabel = mintLabel.trim() || cleanUrl;
            const newId = await createNode(finalLabel, "MEDIA", null);
            
-           await attachFileToNode(newId, (hash.startsWith('youtube:') || hash.startsWith('wikipedia:')) ? '' : linkUrl.trim(), 'text/html', 0, hash);
+           await attachFileToNode(newId, (hash.startsWith('youtube:') || hash.startsWith('wikipedia:')) ? '' : cleanUrl, 'text/html', 0, hash);
            
            // Bonus: Save extracted Open Graph description to properties!
            if (urlDescription) {

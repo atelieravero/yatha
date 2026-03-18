@@ -51,3 +51,49 @@ export function getMediaDetails(properties: Record<string, any> = {}) {
     webUrl
   };
 }
+
+/**
+ * Parses raw URLs to standardize hashes and generate clean fallback labels.
+ * Crucial for deduplication and stripping tracking parameters.
+ */
+export function standardizeUrlMetadata(rawUrl: string) {
+  const trimmedUrl = rawUrl.trim();
+  let cleanUrl = trimmedUrl;
+  let hash = trimmedUrl;
+
+  const ytMatch = trimmedUrl.match(/(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
+  const wikiMatch = trimmedUrl.match(/https?:\/\/([a-z\-]+)\.(?:m\.)?wikipedia\.org\/wiki\/([^#?]+)/);
+
+  if (ytMatch && ytMatch[1]) {
+    cleanUrl = `https://youtube.com/watch?v=${ytMatch[1]}`;
+    hash = `youtube:${ytMatch[1]}`;
+  } else if (wikiMatch && wikiMatch[1] && wikiMatch[2]) {
+    cleanUrl = `https://${wikiMatch[1]}.wikipedia.org/wiki/${wikiMatch[2]}`;
+    hash = `wikipedia:${wikiMatch[1]}:${wikiMatch[2]}`;
+  }
+
+  return { cleanUrl, hash };
+}
+
+/**
+ * Cleans up common bot-blocked skeleton titles (like "- YouTube" or "Access Denied").
+ * Returns an empty string if the title is useless, allowing the UI to gracefully
+ * fallback to the standardized URL instead.
+ */
+export function cleanFetchedTitle(title: string | null | undefined): string {
+  if (!title) return "";
+  
+  let cleaned = title.trim();
+  
+  // Wipe out titles that are literally just bot-blocked skeleton responses
+  if (cleaned === '- YouTube' || cleaned === 'YouTube' || cleaned === 'Access Denied') {
+    return "";
+  } 
+  
+  // Strip the suffix from valid YouTube video titles
+  if (cleaned.endsWith(' - YouTube')) {
+    cleaned = cleaned.replace(' - YouTube', '').trim();
+  }
+  
+  return cleaned;
+}
