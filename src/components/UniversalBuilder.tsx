@@ -139,21 +139,32 @@ export default function UniversalBuilder({
   }, [isOpen, config.mode]);
 
   // --------------------------------------------------------------------------
-  // DYNAMIC PREDICATE OPTIONS (Loophole A Filter)
+  // DYNAMIC PREDICATE OPTIONS (Loophole A Filter & Block Constraints)
   // --------------------------------------------------------------------------
+  
+  // 1. Deduce the allowed target layers for THIS specific block's gateways
+  const configTargetLayers = new Set<string>();
+  if (config.allowedGateways.includes('IDENTITY')) configTargetLayers.add('IDENTITY');
+  if (config.allowedGateways.includes('PHYSICAL')) configTargetLayers.add('PHYSICAL');
+  if (config.allowedGateways.includes('FILE') || config.allowedGateways.includes('URL')) configTargetLayers.add('MEDIA');
+
   const semanticOptions = allPredicates?.filter(p => !p.isSystem && p.isActive).flatMap(p => {
     const opts = [];
     
-    // Check if the Active Node is legally allowed to be the SOURCE of this predicate
+    // For a FORWARD link: Active Node is SOURCE. Block Targets are TARGET.
     const sourceAllowed = !p.sourceLayers || p.sourceLayers.length === 0 || p.sourceLayers.includes(sourceNode.layer);
-    if (sourceAllowed) {
+    const targetMatchesConfig = !p.targetLayers || p.targetLayers.length === 0 || p.targetLayers.some(l => configTargetLayers.has(l));
+    
+    if (sourceAllowed && targetMatchesConfig) {
       opts.push({ v: p.id, l: p.forwardLabel });
     }
     
-    // Check if the Active Node is legally allowed to be the TARGET of this predicate (Reverse Link)
+    // For a REVERSE link: Active Node is TARGET. Block Targets are SOURCE.
     if (!p.isSymmetric) {
       const targetAllowed = !p.targetLayers || p.targetLayers.length === 0 || p.targetLayers.includes(sourceNode.layer);
-      if (targetAllowed) {
+      const sourceMatchesConfig = !p.sourceLayers || p.sourceLayers.length === 0 || p.sourceLayers.some(l => configTargetLayers.has(l));
+      
+      if (targetAllowed && sourceMatchesConfig) {
         opts.push({ v: `${p.id}_REV`, l: p.reverseLabel });
       }
     }
