@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
+  trustHost: true, // <--- Added safely! Crucial for Coolify/Proxies
   callbacks: {
     // 1. The Sign-In Gatekeeper
     async signIn({ user }) {
@@ -17,16 +18,15 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (existingUser) {
         if (!existingUser.isActive) return false; // Reject deactivated users
 
-        // BUG 1 FIX: If they exist but don't have a name/avatar yet (meaning they were invited by an Admin),
-        // or if their Google profile updated, we should sync it!
-        if (user.name || user.image) {
-           await db.update(users)
-             .set({ 
-               name: user.name || existingUser.name, 
-               avatar: user.image || existingUser.avatar 
-             })
-             .where(eq(users.id, existingUser.id));
-        }
+        // Always update lastLoginAt on a successful login.
+        // Sync name/avatar if Google provides an update.
+        await db.update(users)
+          .set({ 
+            name: user.name || existingUser.name, 
+            avatar: user.image || existingUser.avatar,
+            lastLoginAt: new Date()
+          })
+          .where(eq(users.id, existingUser.id));
 
         return true; 
       }
@@ -41,6 +41,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           avatar: user.image,
           role: 'SUPERUSER',
           isActive: true,
+          lastLoginAt: new Date()
         });
         return true;
       }
