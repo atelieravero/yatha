@@ -541,8 +541,8 @@ export async function attachFileToNode(nodeId: string, fileUrl: string, mimeType
 }
 
 // 3. Ask Cloudflare for a secure read ticket (GET) for private viewing
-export async function getSecureMediaUrl(filename: string) {
-  return await generateReadUrl(filename);
+export async function getSecureMediaUrl(filename: string, mimeType?: string) {
+  return await generateReadUrl(filename, mimeType);
 }
 
 // ============================================================================

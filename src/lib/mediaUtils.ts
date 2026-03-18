@@ -9,6 +9,10 @@ export function getMediaDetails(properties: Record<string, any> = {}) {
   const isImage = mimeType.startsWith('image/');
   const isVideo = mimeType.startsWith('video/');
   const isAudio = mimeType.startsWith('audio/');
+  const isPdf = mimeType === 'application/pdf';
+  
+  // Treat anything text-based (txt, csv, md) as a text document, except HTML which is typically a web link
+  const isText = mimeType.startsWith('text/') && mimeType !== 'text/html';
   
   // Safely fallback to the stored payload hash to determine URL/YouTube/Wikipedia formats
   const isYouTube = !!properties.youtube_id || hash.startsWith('youtube:');
@@ -26,6 +30,8 @@ export function getMediaDetails(properties: Record<string, any> = {}) {
   else if (isYouTube) { format = 'YouTube Video'; icon = '📺'; }
   else if (isWikipedia) { format = 'Wikipedia Article'; icon = '🇼'; }
   else if (isWebLink) { format = 'Web Link'; icon = '🔗'; }
+  else if (isPdf) { format = 'PDF Document'; icon = '📑'; }
+  else if (isText) { format = 'Text Document'; icon = '📝'; }
   
   const ytId = properties.youtube_id || hash.replace('youtube:', '');
   let webUrl = properties.url || properties.fileUrl || (hash.startsWith('http') ? hash : '');
@@ -44,6 +50,8 @@ export function getMediaDetails(properties: Record<string, any> = {}) {
     isImage,
     isVideo,
     isAudio,
+    isPdf,
+    isText,
     isYouTube,
     isWikipedia,
     isWebLink,

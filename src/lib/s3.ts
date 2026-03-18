@@ -38,11 +38,18 @@ export async function generateUploadUrl(filename: string, contentType: string) {
   };
 }
 
-export async function generateReadUrl(filename: string) {
+/**
+ * Generates a "Presigned Read URL".
+ * Crucially, we pass 'inline' disposition so PDFs and Text files render in the browser
+ * instead of forcing the user to download them!
+ */
+export async function generateReadUrl(filename: string, mimeType?: string) {
   const command = new GetObjectCommand({
     Bucket: process.env.S3_BUCKET_NAME!,
     Key: filename,
+    ResponseContentDisposition: "inline",
+    ...(mimeType && { ResponseContentType: mimeType }),
   });
-  // Generate a read link valid for 1 hour
+
   return await getSignedUrl(r2Client, command, { expiresIn: 3600 });
 }

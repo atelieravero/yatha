@@ -48,7 +48,7 @@ export default function PeekDrawer({
   const closeHref = `/?node=${activeNodeId}${currentTab ? `&tab=${currentTab}` : ''}`;
   const focusHref = `/?node=${peekNode.id}`;
 
-  const { isImage, isVideo, isAudio, isYouTube, isWebLink, ytId } = mediaDetails;
+  const { isImage, isVideo, isAudio, isPdf, isText, isYouTube, isWebLink, ytId } = mediaDetails;
   
   // Exclude 'notes' so it doesn't get rendered twice in the properties block!
   const propsToDisplay = Object.entries(peekProps).filter(([k]) => k !== 'fileUrl' && k !== 'mimeType' && k !== 'temporal_input' && k !== 'hash' && k !== 'notes');
@@ -110,6 +110,7 @@ export default function PeekDrawer({
           isImage ? <img src={securePeekUrl} alt={peekNode.label} className="max-h-[300px] object-contain" />
           : isVideo ? <video src={securePeekUrl} controls className="max-h-[300px] w-full object-contain bg-black" />
           : isAudio ? <audio src={securePeekUrl} controls className="w-full max-w-[250px] m-4" />
+          : (isPdf || isText) ? <iframe src={securePeekUrl} title={peekNode.label} className="w-full min-h-[400px] bg-white rounded" />
           : <a href={securePeekUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline text-sm font-medium">Download Attached File</a>
         ) : <div className="text-gray-400 dark:text-zinc-500 text-xs font-bold animate-pulse">Loading secure preview...</div>}
     </div>
