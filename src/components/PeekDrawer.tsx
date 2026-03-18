@@ -68,6 +68,7 @@ export default function PeekDrawer({
     activeKinds,
     allPredicates,
     hideEdit: true,
+    canWrite: false, // Forces EdgeRows to hide Retract buttons and act completely Read-Only!
   };
 
   // --- REUSABLE BLOCKS ---
