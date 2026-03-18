@@ -19,6 +19,7 @@ export const users = pgTable('users', {
   avatar: text('avatar'),
   role: text('role').notNull().default('VIEWER'), // 'SUPERUSER', 'ARCHIVIST', 'VIEWER'
   isActive: boolean('is_active').default(true).notNull(),
+  lastLoginAt: timestamp('last_login_at'), // NEW: Tracks active usage
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -70,8 +71,6 @@ export const nodes = pgTable('nodes', {
   
   isActive: boolean('is_active').default(true).notNull(),
   
-  // NOTE: We keep this as text rather than a strict UUID Foreign Key constraint
-  // so that existing mock data ("system_user") doesn't crash the database during migration.
   updatedBy: text('updated_by').notNull().default('system'), 
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

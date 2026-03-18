@@ -10,6 +10,7 @@ type User = {
   avatar: string | null;
   role: string;
   isActive: boolean;
+  lastLoginAt: Date | null;
   createdAt: Date;
 };
 
@@ -24,7 +25,6 @@ export default function AdminClient({
 
   // Invite State
   const [newEmail, setNewEmail] = useState("");
-  // Default to ARCHIVIST since Viewer is deferred
   const [newRole, setNewRole] = useState("ARCHIVIST");
   const [inviteError, setInviteError] = useState<string | null>(null);
 
@@ -60,6 +60,22 @@ export default function AdminClient({
         await toggleUserAccess(id, !currentlyActive);
       });
     }
+  };
+
+  // Helper to format the Last Login date nicely
+  const formatLastLogin = (date: Date | null) => {
+    if (!date) return <span className="text-gray-400 dark:text-zinc-500 italic">Never</span>;
+    
+    const now = new Date();
+    const loginDate = new Date(date);
+    const diffHours = Math.abs(now.getTime() - loginDate.getTime()) / 36e5;
+    
+    if (diffHours < 24) {
+      return <span className="text-emerald-600 dark:text-emerald-400 font-medium">Today</span>;
+    } else if (diffHours < 48) {
+      return <span className="text-blue-600 dark:text-blue-400 font-medium">Yesterday</span>;
+    }
+    return <span className="text-gray-600 dark:text-zinc-400">{loginDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>;
   };
 
   return (
@@ -112,6 +128,7 @@ export default function AdminClient({
                 <th className="p-4 font-bold">User</th>
                 <th className="p-4 font-bold">Role</th>
                 <th className="p-4 font-bold">Status</th>
+                <th className="p-4 font-bold">Last Login</th>
                 <th className="p-4 font-bold text-right">Actions</th>
               </tr>
             </thead>
@@ -166,6 +183,10 @@ export default function AdminClient({
                       }`}>
                         {user.isActive ? '✅ Active' : '🚫 Revoked'}
                       </span>
+                    </td>
+
+                    <td className="p-4 text-xs font-mono">
+                      {formatLastLogin(user.lastLoginAt)}
                     </td>
 
                     <td className="p-4 text-right">
