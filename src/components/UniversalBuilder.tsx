@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
-import { assertEdge, createNode, getUploadTicket, attachFileToNode, checkDuplicateArtifact, createPredicate, getExactMatchNode, restoreNode } from "@/app/actions";
+import { assertEdge, createNode, getUploadTicket, attachFileToNode, checkDuplicateArtifact, createPredicate, getExactMatchNode, restoreNode, fetchUrlMetadata, updateNodeProperties, checkExistingEdge } from "@/app/actions";
 import { SYSTEM_PREDICATES } from "@/db/schema";
 import { getInferredHint } from "@/lib/dateParser";
 import { getNodeDisplay } from "@/lib/nodeUtils";
+import { standardizeUrlMetadata, cleanFetchedTitle } from "@/lib/mediaUtils";
 
 type MinimalNode = { 
   id: string; 
@@ -69,7 +70,7 @@ export default function UniversalBuilder({
   config: BuilderConfig;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [step, setStep] = useState<'PREDICATE' | 'SEARCH' | 'GATEWAY' | 'FORM' | 'PROPERTIES' | 'EXECUTING'>('SEARCH');
+  const [step, setStep] = useState<'PREDICATE' | 'SEARCH' | 'GATEWAY' | 'FORM' | 'PROPERTIES' | 'EXECUTING' | 'ANALYZING' | 'DUPLICATE_WARNING'>('SEARCH');
   const [isPending, startTransition] = useTransition();
 
   // Search & Target State
@@ -81,11 +82,17 @@ export default function UniversalBuilder({
   const [mintLabel, setMintLabel] = useState("");
   const [mintKind, setMintKind] = useState(""); // Only used for Identity
   const [file, setFile] = useState<File | null>(null);
+  const [linkUrl, setLinkUrl] = useState("");
   const [payloadHash, setPayloadHash] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   
+  // Auto-Fetch State
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [urlDescription, setUrlDescription] = useState("");
+  
   // Dedupe State
   const [duplicateFound, setDuplicateFound] = useState<MinimalNode | null>(null);
+  const [duplicateEdgeFound, setDuplicateEdgeFound] = useState(false);
 
   // Properties State (Semantic Edges)
   const [selectedPredicateId, setSelectedPredicateId] = useState("");
@@ -114,8 +121,10 @@ export default function UniversalBuilder({
       setMintLabel("");
       setMintKind("");
       setFile(null);
+      setLinkUrl("");
       setPayloadHash("");
       setDuplicateFound(null);
+      setDuplicateEdgeFound(false);
       setSelectedPredicateId("");
       setSelectedPredicateLabel("");
       setTemporalInput("");
@@ -127,25 +136,38 @@ export default function UniversalBuilder({
       setNewPredReverse("");
       setIsPredSymmetric(false);
       setIsDragging(false);
+      setIsAnalyzing(false);
+      setUrlDescription("");
     }
   }, [isOpen, config.mode]);
 
   // --------------------------------------------------------------------------
-  // DYNAMIC PREDICATE OPTIONS (Loophole A Filter)
+  // DYNAMIC PREDICATE OPTIONS (Loophole A Filter & Block Constraints)
   // --------------------------------------------------------------------------
+  
+  // 1. Deduce the allowed target layers for THIS specific block's gateways
+  const configTargetLayers = new Set<string>();
+  if (config.allowedGateways.includes('IDENTITY')) configTargetLayers.add('IDENTITY');
+  if (config.allowedGateways.includes('PHYSICAL')) configTargetLayers.add('PHYSICAL');
+  if (config.allowedGateways.includes('FILE') || config.allowedGateways.includes('URL')) configTargetLayers.add('MEDIA');
+
   const semanticOptions = allPredicates?.filter(p => !p.isSystem && p.isActive).flatMap(p => {
     const opts = [];
     
-    // Check if the Active Node is legally allowed to be the SOURCE of this predicate
+    // For a FORWARD link: Active Node is SOURCE. Block Targets are TARGET.
     const sourceAllowed = !p.sourceLayers || p.sourceLayers.length === 0 || p.sourceLayers.includes(sourceNode.layer);
-    if (sourceAllowed) {
+    const targetMatchesConfig = !p.targetLayers || p.targetLayers.length === 0 || p.targetLayers.some(l => configTargetLayers.has(l));
+    
+    if (sourceAllowed && targetMatchesConfig) {
       opts.push({ v: p.id, l: p.forwardLabel });
     }
     
-    // Check if the Active Node is legally allowed to be the TARGET of this predicate (Reverse Link)
+    // For a REVERSE link: Active Node is TARGET. Block Targets are SOURCE.
     if (!p.isSymmetric) {
       const targetAllowed = !p.targetLayers || p.targetLayers.length === 0 || p.targetLayers.includes(sourceNode.layer);
-      if (targetAllowed) {
+      const sourceMatchesConfig = !p.sourceLayers || p.sourceLayers.length === 0 || p.sourceLayers.some(l => configTargetLayers.has(l));
+      
+      if (targetAllowed && sourceMatchesConfig) {
         opts.push({ v: `${p.id}_REV`, l: p.reverseLabel });
       }
     }
@@ -241,9 +263,43 @@ export default function UniversalBuilder({
     }
   };
 
-  const handleSelectExisting = (id: string) => {
+  const resolveEdgeDetails = (candidateTargetId: string) => {
+    let edgeSource = sourceNode.id;
+    let edgeTarget = candidateTargetId;
+    
+    if (config.direction === "REVERSE" && config.mode !== 'SEMANTIC') {
+      edgeSource = candidateTargetId;
+      edgeTarget = sourceNode.id;
+    }
+
+    let finalPredicate = SYSTEM_PREDICATES.CARRIES;
+    if (config.mode === 'CONTAINMENT') finalPredicate = SYSTEM_PREDICATES.CONTAINS;
+    if (config.mode === 'SEMANTIC') finalPredicate = selectedPredicateId;
+
+    if (config.mode === 'SEMANTIC' && finalPredicate.endsWith('_REV')) {
+      finalPredicate = finalPredicate.replace('_REV', '');
+      const temp = edgeSource;
+      edgeSource = edgeTarget;
+      edgeTarget = temp;
+    }
+    
+    return { edgeSource, edgeTarget, finalPredicate };
+  };
+
+  const handleSelectExisting = async (id: string) => {
     setTargetId(id);
-    proceedToPropertiesOrExecute(id); 
+    setStep('ANALYZING');
+    
+    const { edgeSource, edgeTarget, finalPredicate } = resolveEdgeDetails(id);
+    const edgeExists = await checkExistingEdge(edgeSource, edgeTarget, finalPredicate);
+    
+    if (edgeExists) {
+      setDuplicateFound(allNodes.find(n => n.id === id) as MinimalNode);
+      setDuplicateEdgeFound(true);
+      setStep('DUPLICATE_WARNING');
+    } else {
+      proceedToPropertiesOrExecute(id); 
+    }
   };
 
   const preselectDefaultKind = () => {
@@ -264,7 +320,11 @@ export default function UniversalBuilder({
   const handleCreateNewClick = () => {
     if (effectiveGateways.length === 1) {
       setActiveGateway(effectiveGateways[0]);
-      setMintLabel(searchTerm);
+      if (effectiveGateways[0] === 'URL') {
+        setLinkUrl(searchTerm);
+      } else {
+        setMintLabel(searchTerm);
+      }
       if (effectiveGateways[0] === 'IDENTITY') preselectDefaultKind();
       setStep('FORM');
     } else {
@@ -274,13 +334,17 @@ export default function UniversalBuilder({
 
   const handleGatewaySelect = (gateway: Gateway) => {
     setActiveGateway(gateway);
-    setMintLabel(searchTerm);
+    if (gateway === 'URL') {
+      setLinkUrl(searchTerm);
+    } else {
+      setMintLabel(searchTerm);
+    }
     if (gateway === 'IDENTITY') preselectDefaultKind();
     setStep('FORM');
   };
 
   // --------------------------------------------------------------------------
-  // DRAG & DROP HANDLERS
+  // DRAG & DROP & URL HANDLERS
   // --------------------------------------------------------------------------
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); };
   const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); };
@@ -296,8 +360,44 @@ export default function UniversalBuilder({
     }
   };
 
+  const handleAnalyzeUrl = async () => {
+    if (!linkUrl.trim()) return;
+    setIsAnalyzing(true);
+    
+    const { cleanUrl } = standardizeUrlMetadata(linkUrl);
+    const rawUrl = linkUrl.trim();
+    
+    try {
+      const metadata = await fetchUrlMetadata(rawUrl);
+      let fetchedTitle = metadata.title || "";
+      
+      // Clean up common bot-blocked skeleton titles (like YouTube)
+      if (fetchedTitle === '- YouTube' || fetchedTitle === 'YouTube' || fetchedTitle === 'Access Denied') {
+        fetchedTitle = "";
+      } else if (fetchedTitle.endsWith(' - YouTube')) {
+        fetchedTitle = fetchedTitle.replace(' - YouTube', '').trim();
+      }
+
+      if (fetchedTitle) {
+        setMintLabel(fetchedTitle);
+      } else {
+        setMintLabel(cleanUrl);
+      }
+      
+      if (metadata.description) {
+        setUrlDescription(metadata.description);
+      }
+    } catch (e) {
+      setMintLabel(cleanUrl);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
   const processFormSubmit = async () => {
     if (!activeGateway) return;
+
+    setStep('ANALYZING');
 
     if (activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') {
       // Soft Dedupe Check (Now Alias-Aware AND Trash-Aware!)
@@ -305,35 +405,44 @@ export default function UniversalBuilder({
 
       if (exactMatch) {
         setDuplicateFound(exactMatch as MinimalNode);
+        
+        // Double check edge collisions!
+        const { edgeSource, edgeTarget, finalPredicate } = resolveEdgeDetails(exactMatch.id);
+        const edgeExists = await checkExistingEdge(edgeSource, edgeTarget, finalPredicate);
+        setDuplicateEdgeFound(edgeExists);
+        
+        setStep('DUPLICATE_WARNING');
         return; 
       }
       proceedToPropertiesOrExecute();
     } 
     else if (activeGateway === 'FILE' || activeGateway === 'URL') {
       // Hard Dedupe Check
+      let existing = null;
       if (activeGateway === 'FILE' && file) {
         const buffer = await file.arrayBuffer();
         const hashBuf = await crypto.subtle.digest('SHA-256', buffer);
         const hex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
         setPayloadHash(hex);
-        
-        const existing = await checkDuplicateArtifact(hex);
-        if (existing) {
-          setDuplicateFound(existing as MinimalNode);
-          return;
-        }
+        existing = await checkDuplicateArtifact(hex);
       } else if (activeGateway === 'URL') {
-        let hash = mintLabel.trim();
-        const ytMatch = hash.match(/(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
-        if (ytMatch && ytMatch[1]) hash = `youtube:${ytMatch[1]}`;
-        
+        const { hash } = standardizeUrlMetadata(linkUrl);
         setPayloadHash(hash);
-        const existing = await checkDuplicateArtifact(hash);
-        if (existing) {
-          setDuplicateFound(existing as MinimalNode);
-          return;
-        }
+        existing = await checkDuplicateArtifact(hash);
       }
+
+      if (existing) {
+        setDuplicateFound(existing as MinimalNode);
+        
+        // Double check edge collisions!
+        const { edgeSource, edgeTarget, finalPredicate } = resolveEdgeDetails(existing.id);
+        const edgeExists = await checkExistingEdge(edgeSource, edgeTarget, finalPredicate);
+        setDuplicateEdgeFound(edgeExists);
+        
+        setStep('DUPLICATE_WARNING');
+        return;
+      }
+      
       proceedToPropertiesOrExecute();
     }
   };
@@ -353,18 +462,15 @@ export default function UniversalBuilder({
       const forward = newPredForward.toLowerCase().trim();
       const reverse = isPredSymmetric ? forward : newPredReverse.toLowerCase().trim();
       
-      const newId = await createPredicate(forward, reverse, isPredSymmetric);
+      await createPredicate(forward, reverse, isPredSymmetric);
       
-      if (newId) {
-        setSelectedPredicateId(newId);
-        setSelectedPredicateLabel(forward); // Optimistically set the label for the UI
-        setStep('SEARCH');
-      }
-
       setIsCreatingPredicate(false);
       setNewPredForward("");
       setNewPredReverse("");
       setIsPredSymmetric(false);
+      // Since createPredicate returns void, we stay on the PREDICATE step
+      // allowing the user to select their newly created verb from the refreshed dropdown.
+      setStep('PREDICATE');
     });
   };
 
@@ -387,33 +493,22 @@ export default function UniversalBuilder({
           await attachFileToNode(finalTargetId, fileUrl, file.type, file.size, payloadHash);
         } 
         else if (activeGateway === 'URL') {
-          finalTargetId = await createNode(mintLabel.trim(), "MEDIA", null);
-          await attachFileToNode(finalTargetId, payloadHash.startsWith('youtube:') ? '' : mintLabel.trim(), 'text/html', 0, payloadHash);
+          const { cleanUrl, hash } = standardizeUrlMetadata(linkUrl);
+          
+          finalTargetId = await createNode(mintLabel.trim() || cleanUrl, "MEDIA", null);
+          await attachFileToNode(finalTargetId, (hash.startsWith('youtube:') || hash.startsWith('wikipedia:')) ? '' : cleanUrl, 'text/html', 0, hash);
+          
+          // Bonus: Save extracted Open Graph description to properties!
+          if (urlDescription) {
+             await updateNodeProperties(finalTargetId, { notes: urlDescription });
+          }
         }
       }
 
       if (!finalTargetId) return setIsOpen(false);
 
       // Phase 2: GRAPH PHYSICS & LINKING
-      let edgeSource = sourceNode.id;
-      let edgeTarget = finalTargetId;
-      
-      if (config.direction === "REVERSE" && config.mode !== 'SEMANTIC') {
-        edgeSource = finalTargetId;
-        edgeTarget = sourceNode.id;
-      }
-
-      let finalPredicate = SYSTEM_PREDICATES.CARRIES;
-      if (config.mode === 'CONTAINMENT') finalPredicate = SYSTEM_PREDICATES.CONTAINS;
-      if (config.mode === 'SEMANTIC') finalPredicate = selectedPredicateId;
-
-      if (config.mode === 'SEMANTIC' && finalPredicate.endsWith('_REV')) {
-        finalPredicate = finalPredicate.replace('_REV', '');
-        const temp = edgeSource;
-        edgeSource = edgeTarget;
-        edgeTarget = temp;
-      }
-
+      const { edgeSource, edgeTarget, finalPredicate } = resolveEdgeDetails(finalTargetId);
       const edgeProperties = locator.trim() ? { locator: locator.trim() } : {};
 
       await assertEdge(
@@ -720,24 +815,102 @@ export default function UniversalBuilder({
                   )}
 
                   {activeGateway === 'URL' && (
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase mb-1">Web Address / URL</label>
-                      <input type="url" autoFocus onFocus={e => e.target.select()} placeholder="https://" value={mintLabel} onChange={e => setMintLabel(e.target.value)} className="w-full p-2.5 text-sm border border-gray-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2 transition-colors shadow-sm" />
-                      <p className="text-[10px] text-gray-400 dark:text-zinc-500 font-medium">YouTube URLs will be automatically detected and converted into playable iframes.</p>
+                    <div className="space-y-3">
+                      <input 
+                        type="url" 
+                        autoFocus 
+                        onFocus={e => e.target.select()} 
+                        placeholder="https://..." 
+                        value={linkUrl} 
+                        onChange={e => setLinkUrl(e.target.value)} 
+                        disabled={isPending || isAnalyzing}
+                        className="w-full p-2.5 text-sm border border-gray-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors shadow-sm" 
+                      />
+                      <button 
+                        onClick={handleAnalyzeUrl} 
+                        disabled={!linkUrl || isAnalyzing || isPending}
+                        className="w-full py-1.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-bold text-xs uppercase tracking-widest rounded hover:bg-blue-200 dark:hover:bg-blue-900/60 transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+                      >
+                        {isAnalyzing ? "Analyzing..." : "Analyze Link →"}
+                      </button>
+
+                      {(linkUrl || mintLabel) && (
+                         <input 
+                           type="text" 
+                           placeholder="Artifact Title (Optional)..." 
+                           value={mintLabel} 
+                           onChange={e => setMintLabel(e.target.value)} 
+                           disabled={isPending || isAnalyzing}
+                           className="w-full p-2.5 text-sm border border-gray-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors shadow-sm" 
+                         />
+                      )}
+                      <p className="text-[10px] text-gray-400 dark:text-zinc-500 font-medium leading-relaxed">YouTube and Wikipedia URLs will be automatically detected and standardized.</p>
                     </div>
                   )}
 
-                  {/* TRASH-AWARE DEDUPLICATION WARNING */}
-                  {duplicateFound && (
-                    <div className={`mt-5 p-4 border rounded-lg transition-colors shadow-sm ${duplicateFound.isActive === false ? 'bg-gray-100 dark:bg-zinc-800 border-gray-300 dark:border-zinc-700' : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50'}`}>
+                  <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-100 dark:border-zinc-800">
+                    <button onClick={() => setStep(effectiveGateways.length === 1 ? 'SEARCH' : 'GATEWAY')} className="text-xs font-medium text-gray-500 dark:text-zinc-400 hover:underline cursor-pointer">← Back</button>
+                    <button 
+                      onClick={processFormSubmit} 
+                      disabled={isPending || isAnalyzing || (activeGateway === 'IDENTITY' && (!mintLabel || !mintKind)) || (activeGateway === 'PHYSICAL' && !mintLabel) || (activeGateway === 'FILE' && !file) || (activeGateway === 'URL' && !linkUrl)}
+                      className="px-5 py-2 bg-blue-600 text-white text-xs font-bold rounded shadow-sm disabled:opacity-50 cursor-pointer hover:bg-blue-700 transition-colors"
+                    >
+                      Continue →
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 3.5: DUPLICATE & COLLISION WARNING */}
+              {step === 'DUPLICATE_WARNING' && duplicateFound && (
+                <div className="animate-in slide-in-from-right-2 p-5 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg shadow-sm transition-colors">
+                   <div className={`p-4 border rounded-lg transition-colors shadow-sm ${duplicateFound.isActive === false ? 'bg-gray-100 dark:bg-zinc-800 border-gray-300 dark:border-zinc-700' : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50'}`}>
+                      
+                      {/* TRASH WARNING */}
                       {duplicateFound.isActive === false ? (
                         <>
                           <p className="text-xs font-bold text-gray-800 dark:text-zinc-200 mb-1 flex items-center gap-1.5"><span>🗑️</span> Found in Trash</p>
-                          <p className="text-xs text-gray-600 dark:text-zinc-400 mb-3">"{duplicateFound.label}" exists, but it was moved to the trash.</p>
-                          <button onClick={handleRestoreFromTrash} disabled={isPending} className="w-full py-2 bg-gray-800 dark:bg-zinc-700 text-white text-xs font-bold rounded hover:bg-gray-900 dark:hover:bg-zinc-600 cursor-pointer shadow-sm transition-colors">
-                            {isPending ? "..." : "Restore & Use Record"}
-                          </button>
+                          <p className="text-xs text-gray-600 dark:text-zinc-400 mb-4">"{duplicateFound.label}" exists, but it was moved to the trash.</p>
+                          <div className="flex gap-2">
+                              <button onClick={() => setStep(activeGateway ? 'FORM' : 'SEARCH')} className="flex-1 py-2 bg-white dark:bg-zinc-900 text-gray-700 dark:text-zinc-300 text-xs font-bold rounded hover:bg-gray-50 dark:hover:bg-zinc-800 cursor-pointer shadow-sm border border-gray-200 dark:border-zinc-700 transition-colors">Cancel</button>
+                              <button onClick={handleRestoreFromTrash} disabled={isPending} className="flex-1 py-2 bg-gray-800 dark:bg-zinc-700 text-white text-xs font-bold rounded hover:bg-gray-900 dark:hover:bg-zinc-600 cursor-pointer shadow-sm transition-colors">
+                                {isPending ? "..." : "Restore & Use"}
+                              </button>
+                          </div>
                         </>
+                      
+                      /* EDGE DUPLICATE WARNING */
+                      ) : duplicateEdgeFound ? (
+                        <>
+                          <p className="text-xs font-bold text-amber-800 dark:text-amber-400 mb-1 flex items-center gap-1.5"><span>⚠️</span> Link Already Exists</p>
+                          <p className="text-xs text-amber-700 dark:text-amber-500 mb-4">
+                            You already have a relationship connecting <strong>{sourceNode.label}</strong> to <strong>{duplicateFound.label}</strong>.
+                          </p>
+                          <div className="flex flex-col gap-2">
+                            <button onClick={() => setStep(activeGateway ? 'FORM' : 'SEARCH')} className="w-full py-2 bg-white dark:bg-zinc-900 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-700/50 text-xs font-bold rounded shadow-sm hover:bg-amber-50 dark:hover:bg-amber-900/30 cursor-pointer transition-colors">
+                              Cancel & Go Back
+                            </button>
+                            <button onClick={() => proceedToPropertiesOrExecute(duplicateFound.id)} className="w-full py-2 bg-amber-600 dark:bg-amber-700 text-white text-xs font-bold rounded shadow-sm hover:bg-amber-700 dark:hover:bg-amber-600 cursor-pointer transition-colors">
+                              Create Duplicate Link Anyway
+                            </button>
+                            
+                            {/* Option 3: Only possible if they are allowed to mint new identities/physical nodes here */}
+                            {(!activeGateway || activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
+                              <button onClick={() => {
+                                if (!activeGateway) {
+                                  setSearchTerm(duplicateFound.label);
+                                  setStep('GATEWAY'); // Switch to minting flow
+                                } else {
+                                  proceedToPropertiesOrExecute(); // Proceed with the current minting flow
+                                }
+                              }} className="w-full py-2 bg-gray-800 dark:bg-zinc-700 text-white text-xs font-bold rounded shadow-sm hover:bg-gray-900 dark:hover:bg-zinc-600 cursor-pointer transition-colors">
+                                Mint New Duplicate Record & Link
+                              </button>
+                            )}
+                          </div>
+                        </>
+
+                      /* NODE DUPLICATE WARNING (Only node matches, no edge collision) */
                       ) : (
                         <>
                           <p className="text-xs font-bold text-amber-800 dark:text-amber-400 mb-1 flex items-center gap-1.5"><span>⚠️</span> Exact Match Found</p>
@@ -748,28 +921,17 @@ export default function UniversalBuilder({
                             )} already exists.
                           </p>
                           <div className="flex gap-2">
-                            <button onClick={() => handleSelectExisting(duplicateFound.id)} className="flex-1 py-2 bg-amber-600 dark:bg-amber-700 text-white text-xs font-bold rounded shadow-sm hover:bg-amber-700 dark:hover:bg-amber-600 cursor-pointer transition-colors">Use Existing</button>
+                            <button onClick={() => proceedToPropertiesOrExecute(duplicateFound.id)} className="flex-1 py-2 bg-amber-600 dark:bg-amber-700 text-white text-xs font-bold rounded shadow-sm hover:bg-amber-700 dark:hover:bg-amber-600 cursor-pointer transition-colors">Use Existing</button>
                             {(activeGateway === 'IDENTITY' || activeGateway === 'PHYSICAL') && (
                               <button onClick={() => proceedToPropertiesOrExecute()} className="flex-1 py-2 bg-white dark:bg-zinc-900 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-700/50 text-xs font-bold rounded shadow-sm hover:bg-amber-50 dark:hover:bg-amber-900/30 cursor-pointer transition-colors">Mint Duplicate</button>
                             )}
                           </div>
+                          <button onClick={() => setStep(activeGateway ? 'FORM' : 'SEARCH')} className="w-full py-2 mt-2 text-amber-800 dark:text-amber-400 text-xs font-bold hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded transition-colors cursor-pointer">
+                            Cancel
+                          </button>
                         </>
                       )}
-                    </div>
-                  )}
-
-                  <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-100 dark:border-zinc-800">
-                    <button onClick={() => setStep(effectiveGateways.length === 1 ? 'SEARCH' : 'GATEWAY')} className="text-xs font-medium text-gray-500 dark:text-zinc-400 hover:underline cursor-pointer">← Back</button>
-                    {!duplicateFound && (
-                      <button 
-                        onClick={processFormSubmit} 
-                        disabled={(activeGateway === 'IDENTITY' && (!mintLabel || !mintKind)) || (activeGateway === 'PHYSICAL' && !mintLabel) || (activeGateway === 'FILE' && !file) || (activeGateway === 'URL' && !mintLabel)}
-                        className="px-5 py-2 bg-blue-600 text-white text-xs font-bold rounded shadow-sm disabled:opacity-50 cursor-pointer hover:bg-blue-700 transition-colors"
-                      >
-                        Continue →
-                      </button>
-                    )}
-                  </div>
+                   </div>
                 </div>
               )}
 
@@ -831,7 +993,14 @@ export default function UniversalBuilder({
                 </div>
               )}
 
-              {/* STEP 5: EXECUTING */}
+              {/* STEP 5 & 6: PROCESSING STATES */}
+              {step === 'ANALYZING' && (
+                <div className="py-12 text-center animate-in fade-in flex flex-col items-center gap-4 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg transition-colors shadow-sm">
+                  <span className="text-4xl animate-spin text-blue-600 dark:text-blue-400">⏳</span>
+                  <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest">Analyzing Graph...</p>
+                </div>
+              )}
+
               {step === 'EXECUTING' && (
                 <div className="py-12 text-center animate-in fade-in flex flex-col items-center gap-4 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg transition-colors shadow-sm">
                   <span className="text-4xl animate-spin text-blue-600 dark:text-blue-400">🌀</span>

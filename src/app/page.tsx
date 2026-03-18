@@ -12,7 +12,7 @@ import NodeHistoryViewer from "@/components/NodeHistoryViewer";
 import NodeLabelEditor from "@/components/NodeLabelEditor";
 import PeekDrawer from "@/components/PeekDrawer";
 import NodeTrashToggle from "@/components/NodeTrashToggle";
-import CollapsibleEdgeBlock from "@/components/CollapsibleEdgeBlock";
+import NodeLayoutEngine from "@/components/NodeLayoutEngine";
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -149,13 +149,10 @@ export default async function Home({
     }
   }
 
-  const isIdentity = activeNode.layer === 'IDENTITY';
-  const isPhysical = activeNode.layer === 'PHYSICAL';
   const isMedia = activeNode.layer === 'MEDIA';
   
   // Use the new shared utility to sort the edges!
   const groups = groupEdges(connectedEdges, activeNode, allNodes);
-  const { physicalHoldings, digitalArtifacts, mediaAppearances, conceptualSemantics, bridgedConcepts, physicalSources, containedIn, containsItems } = groups;
 
   // Base props required by all edge blocks
   const edgeContext = {
@@ -195,161 +192,50 @@ export default async function Home({
           </div>
         </div>
 
-        {/* 2a. BRIDGED CONCEPTS (Physical & Media) */}
-        {(isPhysical || isMedia) && (
-          <CollapsibleEdgeBlock
-            {...edgeContext}
-            title="Bridged Concept"
-            icon="💡"
-            items={bridgedConcepts}
-            hideBadge
-            hideEdit
-            fixedPredDef={{ forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }}
-            builderConfig={{
-              mode: 'STRUCTURAL', direction: 'FORWARD', allowedGateways: ['IDENTITY'],
-              buttonLabel: 'Link Concept', modalTitle: 'Bridged Concept', icon: '💡', theme: 'blue', hideEdgeProperties: true
-            }}
-          />
-        )}
-
-        {/* 2b. PHYSICAL SOURCE MATERIAL (Media Only) */}
-        {isMedia && (
-          <CollapsibleEdgeBlock
-            {...edgeContext}
-            title="Physical Source Material"
-            icon="📦"
-            items={physicalSources}
-            hideBadge
-            hideEdit
-            fixedPredDef={{ forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }}
-            builderConfig={{
-              mode: 'STRUCTURAL', direction: 'FORWARD', allowedGateways: ['PHYSICAL'],
-              buttonLabel: 'Link Source', modalTitle: 'Physical Source Material', icon: '📦', theme: 'amber', hideEdgeProperties: true
-            }}
-          />
-        )}
-
-        {/* 3. MEDIA VIEWER (Media Only) */}
-        {isMedia && (
-          <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-2 shadow-sm mb-6 transition-colors">
-            {hasFile ? (
-              <div className="rounded bg-gray-100 dark:bg-zinc-950 overflow-hidden flex items-center justify-center min-h-[300px] transition-colors">
-                {isYouTube ? (
-                  <iframe className="w-full max-w-2xl aspect-video rounded shadow-sm m-4" src={`https://www.youtube.com/embed/${ytId}`} allowFullScreen></iframe>
-                ) : isWebLink ? (
-                  <div className="p-8 text-center flex flex-col items-center gap-4">
-                    <span className="text-5xl block mb-2">🔗</span>
-                    <a href={webUrl} target="_blank" rel="noopener noreferrer" className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm">Open Web Link ↗</a>
+        {/* 2. THE MASTER LAYOUT ENGINE */}
+        <NodeLayoutEngine
+          node={activeNode}
+          groups={groups}
+          edgeContext={edgeContext}
+          propertiesComponent={
+            <PropertiesEditor 
+              nodeId={activeNode.id} 
+              layer={activeNode.layer as any} 
+              kind={activeNode.kind || ''} 
+              initialProps={nodeProps} 
+              allNodes={allNodes} 
+              notEarlierThan={activeNode.notEarlierThan} 
+              notLaterThan={activeNode.notLaterThan}
+            />
+          }
+          mediaViewerComponent={
+            isMedia ? (
+              <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-2 shadow-sm mb-6 transition-colors">
+                {hasFile ? (
+                  <div className="rounded bg-gray-100 dark:bg-zinc-950 overflow-hidden flex items-center justify-center min-h-[300px] transition-colors">
+                    {isYouTube ? (
+                      <iframe className="w-full max-w-2xl aspect-video rounded shadow-sm m-4" src={`https://www.youtube.com/embed/${ytId}`} allowFullScreen></iframe>
+                    ) : isWebLink ? (
+                      <div className="p-8 text-center flex flex-col items-center gap-4">
+                        <span className="text-5xl block mb-2">🔗</span>
+                        <a href={webUrl} target="_blank" rel="noopener noreferrer" className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm">Open Web Link ↗</a>
+                      </div>
+                    ) : secureViewUrl ? (
+                      isImage ? <img src={secureViewUrl} alt={activeNode.label} className="max-h-[500px] object-contain" />
+                      : isVideo ? <video src={secureViewUrl} controls className="max-h-[500px] w-full object-contain bg-black rounded" />
+                      : isAudio ? <audio src={secureViewUrl} controls className="w-full max-w-md m-8" />
+                      : <a href={secureViewUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline p-8 transition-colors">View Attached File</a>
+                    ) : <div className="p-8 text-gray-400 dark:text-zinc-500 animate-pulse text-sm font-bold">Loading secure viewer...</div>}
                   </div>
-                ) : secureViewUrl ? (
-                  isImage ? <img src={secureViewUrl} alt={activeNode.label} className="max-h-[500px] object-contain" />
-                  : isVideo ? <video src={secureViewUrl} controls className="max-h-[500px] w-full object-contain bg-black rounded" />
-                  : isAudio ? <audio src={secureViewUrl} controls className="w-full max-w-md m-8" />
-                  : <a href={secureViewUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline p-8 transition-colors">View Attached File</a>
-                ) : <div className="p-8 text-gray-400 dark:text-zinc-500 animate-pulse text-sm font-bold">Loading secure viewer...</div>}
+                ) : (
+                  <div className="p-8 text-gray-400 dark:text-zinc-500 italic text-center text-sm border-2 border-dashed border-gray-200 dark:border-zinc-800 rounded-xl bg-gray-50 dark:bg-zinc-800/50 transition-colors">
+                    No media payload attached to this record.
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="p-8 text-gray-400 dark:text-zinc-500 italic text-center text-sm border-2 border-dashed border-gray-200 dark:border-zinc-800 rounded-xl bg-gray-50 dark:bg-zinc-800/50 transition-colors">
-                No media payload attached to this record.
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 4. INTRINSIC PROPERTIES (All Layers) */}
-        <PropertiesEditor 
-          nodeId={activeNode.id} layer={activeNode.layer as any} kind={activeNode.kind || ''} 
-          initialProps={nodeProps} allNodes={allNodes} notEarlierThan={activeNode.notEarlierThan} notLaterThan={activeNode.notLaterThan}
+            ) : null
+          }
         />
-
-        {/* 5. PHYSICAL HOLDINGS (Identities Only) */}
-        {isIdentity && (
-          <CollapsibleEdgeBlock
-            {...edgeContext}
-            title="Physical Holdings"
-            icon="📦"
-            items={physicalHoldings}
-            hideEdit
-            fixedPredDef={{ forwardLabel: 'CARRIES', reverseLabel: 'CARRIED BY', isSystem: true }}
-            builderConfig={{
-              mode: 'STRUCTURAL', direction: 'REVERSE', allowedGateways: ['PHYSICAL'],
-              buttonLabel: 'Add Holding', modalTitle: 'Physical Holdings', icon: '📦', theme: 'amber', hideEdgeProperties: true
-            }}
-          />
-        )}
-
-        {/* 6. CONCEPTUAL SEMANTICS (All Layers) */}
-        <CollapsibleEdgeBlock
-          {...edgeContext}
-          title={isMedia ? 'Identified Subjects & Semantics' : 'Conceptual Semantics'}
-          icon={isMedia ? '📍' : '🔗'}
-          items={conceptualSemantics}
-          builderConfig={{
-            mode: 'SEMANTIC', 
-            allowedGateways: isIdentity ? ['IDENTITY', 'PHYSICAL'] : (isPhysical ? ['IDENTITY', 'FILE', 'URL'] : ['IDENTITY', 'PHYSICAL']),
-            buttonLabel: 'Assert Link', modalTitle: 'Semantic Connection', icon: '🔗', theme: 'emerald', hideEdgeProperties: false
-          }}
-        />
-
-        {/* 7. DIGITAL EMBODIMENTS (Identity & Physical) */}
-        {(isIdentity || isPhysical) && (
-          <CollapsibleEdgeBlock
-            {...edgeContext}
-            title="Digital Embodiments"
-            icon="🖼️"
-            items={digitalArtifacts}
-            hideBadge
-            hideEdit
-            builderConfig={{
-              mode: 'STRUCTURAL', direction: 'REVERSE', allowedGateways: ['FILE', 'URL'],
-              buttonLabel: 'Add Artifact', modalTitle: 'Digital Artifact', icon: '🖼️', theme: 'blue', hideEdgeProperties: true
-            }}
-          />
-        )}
-
-        {/* 8. MEDIA APPEARANCES (Identity & Physical) */}
-        {(isIdentity || isPhysical) && (
-          <CollapsibleEdgeBlock
-            {...edgeContext}
-            title="Media Appearances"
-            icon="📸"
-            items={mediaAppearances}
-            builderConfig={{
-              mode: 'SEMANTIC', allowedGateways: ['FILE', 'URL'],
-              buttonLabel: 'Tag in Media', modalTitle: 'Media Appearance', icon: '📸', theme: 'emerald', hideEdgeProperties: false
-            }}
-          />
-        )}
-
-        {/* 9. COLLECTIONS (Contained In) */}
-        <CollapsibleEdgeBlock
-          {...edgeContext}
-          title="Contained In (Locations & Collections)"
-          icon="📥"
-          items={containedIn}
-          hideEdit
-          fixedPredDef={{ forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }}
-          builderConfig={{
-            mode: 'CONTAINMENT', direction: 'REVERSE', allowedGateways: ['IDENTITY', 'PHYSICAL'],
-            buttonLabel: 'Add Location', modalTitle: 'Contained In', icon: '📥', theme: 'blue', hideEdgeProperties: true
-          }}
-        />
-
-        {/* 10. CONTENTS (Contains Items - Identity & Physical Only) */}
-        {!isMedia && (
-          <CollapsibleEdgeBlock
-            {...edgeContext}
-            title="Contents & Items"
-            icon="📥"
-            items={containsItems}
-            hideEdit
-            fixedPredDef={{ forwardLabel: 'CONTAINS', reverseLabel: 'PART OF', isSystem: true }}
-            builderConfig={{
-              mode: 'CONTAINMENT', direction: 'FORWARD', allowedGateways: isIdentity ? ['IDENTITY', 'PHYSICAL', 'FILE', 'URL'] : ['PHYSICAL'],
-              buttonLabel: 'Add Item', modalTitle: 'Contents & Items', icon: '📥', theme: 'blue', hideEdgeProperties: true
-            }}
-          />
-        )}
 
       </div>
 
