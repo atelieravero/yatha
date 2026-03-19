@@ -50,8 +50,18 @@ export default function PeekDrawer({
 
   const { isImage, isVideo, isAudio, isPdf, isText, isYouTube, isWebLink, ytId } = mediaDetails;
   
-  // Exclude 'notes' so it doesn't get rendered twice in the properties block!
-  const propsToDisplay = Object.entries(peekProps).filter(([k]) => k !== 'fileUrl' && k !== 'mimeType' && k !== 'temporal_input' && k !== 'hash' && k !== 'notes');
+  // Exclude 'notes' and base64 caches so they don't bloat the properties block!
+  const propsToDisplay = Object.entries(peekProps).filter(([k]) => 
+    k !== 'fileUrl' && 
+    k !== 'mimeType' && 
+    k !== 'temporal_input' && 
+    k !== 'hash' && 
+    k !== 'notes' &&
+    k !== 'avatar_base64' &&
+    k !== 'avatar_source_id' &&
+    k !== 'thumbnail_base64'
+  );
+  
   const isTombstone = peekNode.isActive === false;
 
   // --------------------------------------------------------------------------
@@ -129,12 +139,7 @@ export default function PeekDrawer({
         {/* Header */}
         <div className="p-4 border-b border-gray-100 dark:border-zinc-800 flex items-center justify-between bg-gray-50/50 dark:bg-zinc-900/50 rounded-t-2xl md:rounded-none transition-colors">
           <div className="flex items-center gap-2">
-            {avatarUrl ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img src={avatarUrl} alt={label} className="w-6 h-6 sm:w-7 sm:h-7 rounded-full object-cover shadow-sm ring-2 ring-gray-200 dark:ring-zinc-700" />
-            ) : (
-              <span className="text-xl opacity-80">{icon}</span>
-            )}
+            <span className="text-xl opacity-80">{icon}</span>
             <span className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest">{label}</span>
           </div>
           <div className="flex items-center gap-2">
@@ -148,24 +153,31 @@ export default function PeekDrawer({
         <div className="flex-1 overflow-y-auto p-4 md:p-6">
           
           {/* 1. The Core Identity Title */}
-          <div>
-            <h2 className={`text-2xl font-serif font-medium text-gray-900 dark:text-zinc-100 mb-1 ${isTombstone ? 'line-through decoration-gray-400 dark:decoration-zinc-500' : ''}`}>
-              {peekNode.label}
-            </h2>
-            {isTombstone && <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest block mb-2">(Deleted Record)</span>}
-            {peekNode.aliases && peekNode.aliases.length > 0 && (
-              <p className="text-sm text-gray-500 dark:text-zinc-400 font-mono mb-2">
-                {peekNode.aliases.join(' • ')}
-              </p>
+          <div className="flex items-start sm:items-center gap-4 mb-2">
+            {avatarUrl && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={avatarUrl} alt={label} className="w-14 h-14 rounded-full object-cover shadow-sm ring-2 ring-gray-200 dark:ring-zinc-700 shrink-0" />
             )}
-            
-            <a 
-              href={focusHref} 
-              className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors mt-2 mb-6 border border-blue-200 dark:border-blue-800/50 px-3 py-1.5 rounded bg-blue-50 dark:bg-blue-900/20 shadow-sm"
-            >
-              Focus this record ↗
-            </a>
+            <div>
+              <h2 className={`text-2xl font-serif font-medium text-gray-900 dark:text-zinc-100 mb-1 ${isTombstone ? 'line-through decoration-gray-400 dark:decoration-zinc-500' : ''}`}>
+                {peekNode.label}
+              </h2>
+              {isTombstone && <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest block mb-2">(Deleted Record)</span>}
+            </div>
           </div>
+          
+          {peekNode.aliases && peekNode.aliases.length > 0 && (
+            <p className="text-sm text-gray-500 dark:text-zinc-400 font-mono mb-2">
+              {peekNode.aliases.join(' • ')}
+            </p>
+          )}
+            
+          <a 
+            href={focusHref} 
+            className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors mt-2 mb-6 border border-blue-200 dark:border-blue-800/50 px-3 py-1.5 rounded bg-blue-50 dark:bg-blue-900/20 shadow-sm"
+          >
+            Focus this record ↗
+          </a>
 
           {/* Dynamic Structured Parity Layout */}
           <div className="space-y-2">
