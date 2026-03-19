@@ -507,7 +507,14 @@ export async function getUploadTicket(filename: string, contentType: string) {
 }
 
 // 2. Save the resulting Cloudflare URL and file metadata into the Node's JSONB properties
-export async function attachFileToNode(nodeId: string, fileUrl: string, mimeType: string, fileSize: number, hash: string) {
+export async function attachFileToNode(
+  nodeId: string, 
+  fileUrl: string, 
+  mimeType: string, 
+  fileSize: number, 
+  hash: string,
+  thumbnailBase64?: string
+) {
   const userId = await requireUserId();
   // Capture snapshot before attaching media properties
   const currentNode = await captureNodeSnapshot(nodeId, userId);
@@ -521,13 +528,17 @@ export async function attachFileToNode(nodeId: string, fileUrl: string, mimeType
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const updatedProps = { 
+  const updatedProps: Record<string, any> = { 
     ...existingProps, 
     fileUrl, 
     mimeType,
     fileSize: formatBytes(fileSize),
     hash
   };
+
+  if (thumbnailBase64) {
+    updatedProps.thumbnail_base64 = thumbnailBase64;
+  }
 
   await db.update(nodes)
     .set({ 

@@ -43,7 +43,7 @@ export default function PeekDrawer({
   // --------------------------------------------------------------------------
   const peekProps = (peekNode?.properties as Record<string, any>) || {};
   const mediaDetails = getMediaDetails(peekProps);
-  const { icon, kindLabel: label } = getNodeDisplay(peekNode, activeKinds);
+  const { icon, kindLabel: label, avatarUrl } = getNodeDisplay(peekNode, activeKinds);
 
   const closeHref = `/?node=${activeNodeId}${currentTab ? `&tab=${currentTab}` : ''}`;
   const focusHref = `/?node=${peekNode.id}`;
@@ -61,14 +61,15 @@ export default function PeekDrawer({
   const isMedia = peekNode.layer === 'MEDIA';
 
   // Base props required by all edge blocks in the drawer.
-  // Note: hideEdit is strictly forced to TRUE because drawers are read-only views!
   const edgeContext = {
     currentTab,
     activeNodeId: peekNode.id, // The drawer's node is the active node for these blocks
+    sourceNode: peekNode,      // Passed so we have properties of the target node to write the avatar to!
+    allNodes: contextData.relatedNodes,
     activeKinds,
     allPredicates,
-    hideEdit: true,
-    canWrite: false, // Forces EdgeRows to hide Retract buttons and act completely Read-Only!
+    hideEdit: true, // Prevents creating new edges
+    canWrite: true, // Enabled so users can use the "Pin as Profile Picture" feature from the drawer!
   };
 
   // --- REUSABLE BLOCKS ---
@@ -128,7 +129,12 @@ export default function PeekDrawer({
         {/* Header */}
         <div className="p-4 border-b border-gray-100 dark:border-zinc-800 flex items-center justify-between bg-gray-50/50 dark:bg-zinc-900/50 rounded-t-2xl md:rounded-none transition-colors">
           <div className="flex items-center gap-2">
-            <span className="text-xl opacity-80">{icon}</span>
+            {avatarUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={avatarUrl} alt={label} className="w-6 h-6 sm:w-7 sm:h-7 rounded-full object-cover shadow-sm ring-2 ring-gray-200 dark:ring-zinc-700" />
+            ) : (
+              <span className="text-xl opacity-80">{icon}</span>
+            )}
             <span className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest">{label}</span>
           </div>
           <div className="flex items-center gap-2">

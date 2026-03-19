@@ -1,15 +1,24 @@
 import { getMediaDetails } from "@/lib/mediaUtils";
 
 /**
- * Consistently resolves the display icon and label for any node
- * based on its 3-Layer architecture and taxonomy definitions.
+ * Consistently resolves the display icon, label, and custom avatar 
+ * for any node based on its 3-Layer architecture and taxonomy definitions.
  */
 export function getNodeDisplay(node: any, activeKinds: any[] = []) {
   let icon = '🟣';
   let kindLabel = 'Concept';
+  let avatarUrl = null;
 
-  if (!node) return { icon, kindLabel };
+  if (!node) return { icon, kindLabel, avatarUrl };
 
+  // 1. Resolve custom avatars first (Base64 from Postgres JSONB)
+  if (node.properties?.avatar_base64) {
+    avatarUrl = node.properties.avatar_base64;
+  } else if (node.properties?.thumbnail_base64) {
+    avatarUrl = node.properties.thumbnail_base64;
+  }
+
+  // 2. Resolve taxonomic fallbacks
   // Graceful fallback logic to safely support older nodes from the Alpha "INSTANCE" layer
   const isPhysical = node.layer === 'PHYSICAL' || (node.layer === 'INSTANCE' && node.kind?.startsWith('PHYSICAL'));
   const isMedia = node.layer === 'MEDIA' || (node.layer === 'INSTANCE' && !node.kind?.startsWith('PHYSICAL'));
@@ -40,5 +49,5 @@ export function getNodeDisplay(node: any, activeKinds: any[] = []) {
     }
   }
 
-  return { icon, kindLabel };
+  return { icon, kindLabel, avatarUrl };
 }

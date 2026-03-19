@@ -6,6 +6,7 @@ import { SYSTEM_PREDICATES } from "@/db/schema";
 import { getInferredHint } from "@/lib/dateParser";
 import { getNodeDisplay } from "@/lib/nodeUtils";
 import { standardizeUrlMetadata, cleanFetchedTitle } from "@/lib/mediaUtils";
+import { generateAutoThumbnail } from "@/lib/imageUtils";
 
 type MinimalNode = { 
   id: string; 
@@ -485,12 +486,23 @@ export default function UniversalBuilder({
           finalTargetId = await createNode(mintLabel.trim(), activeGateway, activeGateway === 'IDENTITY' ? mintKind : null);
         } 
         else if (activeGateway === 'FILE' && file) {
+          let thumbnailBase64 = undefined;
+          
+          // Generate thumbnail locally if it's an image
+          if (file.type.startsWith('image/')) {
+            try {
+              thumbnailBase64 = await generateAutoThumbnail(file);
+            } catch (err) {
+              console.warn("Could not generate auto-thumbnail:", err);
+            }
+          }
+
           finalTargetId = await createNode(mintLabel.trim() || file.name, "MEDIA", null);
           const { uploadUrl, fileUrl } = await getUploadTicket(file.name, file.type);
           if (uploadUrl && uploadUrl !== 'mock') {
             await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
           }
-          await attachFileToNode(finalTargetId, fileUrl, file.type, file.size, payloadHash);
+          await attachFileToNode(finalTargetId, fileUrl, file.type, file.size, payloadHash, thumbnailBase64);
         } 
         else if (activeGateway === 'URL') {
           const { cleanUrl, hash } = standardizeUrlMetadata(linkUrl);
@@ -781,7 +793,7 @@ export default function UniversalBuilder({
                     <div className="space-y-4">
                       <div>
                         <label className="block text-[10px] font-bold text-gray-500 dark:text-zinc-400 uppercase mb-1">Name / Primary Label</label>
-                        <input type="text" autoFocus onFocus={e => e.target.select()} value={mintLabel} onChange={e => setMintLabel(e.target.value)} className="w-full p-2.5 text-sm border border-gray-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors shadow-sm" />
+                        <input type="text" autoFocus onFocus={e => e.target.select()} value={mintLabel} onChange={e => setMintLabel(e.target.value)} className="w-full p-2.5 text-sm border border-gray-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-50 transition-colors shadow-sm" />
                       </div>
                       {activeGateway === 'IDENTITY' && (
                         <div>

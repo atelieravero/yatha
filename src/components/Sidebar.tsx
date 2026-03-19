@@ -7,6 +7,7 @@ import Link from "next/link";
 import { createNode, searchGraphNodes, checkDuplicateArtifact, getUploadTicket, attachFileToNode, getExactMatchNode, restoreNode, fetchUrlMetadata, updateNodeProperties } from "@/app/actions";
 import { getNodeDisplay } from "@/lib/nodeUtils";
 import { standardizeUrlMetadata, cleanFetchedTitle } from "@/lib/mediaUtils";
+import { generateAutoThumbnail } from "@/lib/imageUtils";
 
 type Node = {
   id: string;
@@ -168,6 +169,17 @@ export default function Sidebar({
     } else if (activeGateway === 'FILE') {
       startTransition(async () => {
          if (file) {
+           let thumbnailBase64 = undefined;
+           
+           // Generate thumbnail locally if it's an image
+           if (file.type.startsWith('image/')) {
+             try {
+               thumbnailBase64 = await generateAutoThumbnail(file);
+             } catch (err) {
+               console.warn("Could not generate auto-thumbnail:", err);
+             }
+           }
+
            const buffer = await file.arrayBuffer();
            const hashBuf = await crypto.subtle.digest('SHA-256', buffer);
            const hex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -180,7 +192,7 @@ export default function Sidebar({
            if (uploadUrl && uploadUrl !== 'mock') {
               await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
            }
-           await attachFileToNode(newId, fileUrl, file.type, file.size, hex);
+           await attachFileToNode(newId, fileUrl, file.type, file.size, hex, thumbnailBase64);
            handleCloseMinting();
            router.push(`/?node=${newId}`);
            setIsMobileMenuOpen(false);
@@ -239,7 +251,7 @@ export default function Sidebar({
         </h3>
         <div className="space-y-0.5 px-2">
           {layerNodes.map(node => {
-            const { icon } = getNodeDisplay(node, activeKinds);
+            const { icon, avatarUrl } = getNodeDisplay(node, activeKinds);
             const isActive = activeNodeId === node.id;
             const isTombstone = node.isActive === false;
 
@@ -255,7 +267,14 @@ export default function Sidebar({
                     : 'hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-700 dark:text-zinc-300'
                 } ${isTombstone ? 'opacity-50 grayscale' : ''}`}
               >
-                <span className={`opacity-80 shrink-0 ${isActive ? 'text-blue-600 dark:text-blue-400' : ''}`}>{icon}</span>
+                <span className={`shrink-0 flex items-center justify-center w-5 h-5 ${!avatarUrl && isActive ? 'text-blue-600 dark:text-blue-400' : 'opacity-80'}`}>
+                  {avatarUrl ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={avatarUrl} alt={node.label} className="w-5 h-5 rounded-full object-cover shadow-sm" />
+                  ) : (
+                    icon
+                  )}
+                </span>
                 <div className="flex flex-col min-w-0">
                   <span className={`truncate ${isTombstone ? 'line-through decoration-gray-400 dark:decoration-zinc-500' : ''}`}>{node.label}</span>
                   {searchQuery.trim() && node.aliases && node.aliases.length > 0 && node.aliases.some(a => a.toLowerCase().includes(searchQuery.trim().toLowerCase())) && (
@@ -521,7 +540,7 @@ export default function Sidebar({
 
         {licenseeName && (
           <div className="py-2 border-t border-gray-200 dark:border-zinc-800 bg-gray-50/50 dark:bg-zinc-900/50 text-[9px] text-gray-400 dark:text-zinc-500 font-mono tracking-widest uppercase text-center transition-colors">
-            License: {licenseeName}
+            Licensee: {licenseeName}
           </div>
         )}
       </div>
