@@ -4,6 +4,7 @@ import { nodes, edges, SYSTEM_PREDICATES } from "@/db/schema";
 import { getSecureMediaUrl, getRecentNodes, getAllKinds, seedSystemPredicates, getAllPredicates } from "@/app/actions";
 import { getMediaDetails } from "@/lib/mediaUtils";
 import { groupEdges } from "@/lib/edgeGrouping";
+import { getNodeDisplay } from "@/lib/nodeUtils";
 
 import PropertiesEditor from "@/components/PropertiesEditor";
 import NodeClassification from "@/components/NodeClassification";
@@ -116,15 +117,18 @@ export default async function Home({
   const allKinds = await getAllKinds();
   const activeKinds = allKinds.filter(k => k.isActive);
 
+  // Extract the avatarUrl using our nodeUtils
+  const { avatarUrl } = getNodeDisplay(activeNode, activeKinds);
+
   const nodeProps = (activeNode.properties as Record<string, any>) || {};
-  const { isImage, isVideo, isAudio, isYouTube, isWebLink, ytId, webUrl } = getMediaDetails(nodeProps);
+  const { isImage, isVideo, isAudio, isPdf, isText, isYouTube, isWebLink, ytId, webUrl } = getMediaDetails(nodeProps);
   const hasFile = !!nodeProps.fileUrl || isYouTube || isWebLink;
 
   let secureViewUrl = "";
   if (nodeProps.fileUrl && !isWebLink && !isYouTube) {
     try {
       const filename = nodeProps.fileUrl.split('/').pop();
-      if (filename) secureViewUrl = await getSecureMediaUrl(filename);
+      if (filename) secureViewUrl = await getSecureMediaUrl(filename, nodeProps.mimeType);
     } catch (error) {
       console.error("Failed to generate secure read ticket:", error);
     }
@@ -143,7 +147,7 @@ export default async function Home({
     
     if (peekNode && peekProps.fileUrl && !peekIsWeb) {
       const filename = peekProps.fileUrl.split('/').pop();
-      if (filename) securePeekUrl = await getSecureMediaUrl(filename);
+      if (filename) securePeekUrl = await getSecureMediaUrl(filename, peekProps.mimeType);
     } else if (peekIsWeb) {
       securePeekUrl = peekMedia.webUrl || peekProps.hash; 
     }
@@ -182,7 +186,7 @@ export default async function Home({
           
           <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
-              <NodeLabelEditor nodeId={activeNode.id} initialLabel={activeNode.label} />
+              <NodeLabelEditor nodeId={activeNode.id} initialLabel={activeNode.label} avatarUrl={avatarUrl} />
               <AliasEditor nodeId={activeNode.id} initialAliases={activeNode.aliases || []} />
             </div>
             <div className="flex items-center gap-2 mt-2 md:mt-0 shrink-0">
@@ -224,6 +228,7 @@ export default async function Home({
                       isImage ? <img src={secureViewUrl} alt={activeNode.label} className="max-h-[500px] object-contain" />
                       : isVideo ? <video src={secureViewUrl} controls className="max-h-[500px] w-full object-contain bg-black rounded" />
                       : isAudio ? <audio src={secureViewUrl} controls className="w-full max-w-md m-8" />
+                      : (isPdf || isText) ? <iframe src={secureViewUrl} title={activeNode.label} className="w-full h-[70vh] min-h-[600px] bg-white rounded shadow-sm border border-gray-200 dark:border-zinc-800" />
                       : <a href={secureViewUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline p-8 transition-colors">View Attached File</a>
                     ) : <div className="p-8 text-gray-400 dark:text-zinc-500 animate-pulse text-sm font-bold">Loading secure viewer...</div>}
                   </div>

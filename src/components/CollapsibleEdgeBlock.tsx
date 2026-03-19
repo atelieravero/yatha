@@ -156,6 +156,7 @@ export default function CollapsibleEdgeBlock({
                 predDef={predDef}
                 currentTab={currentTab}
                 activeNodeId={activeNodeId}
+                sourceNode={sourceNode} // Passed so we have properties of the target node to write the avatar to!
                 activeKinds={activeKinds}
                 hideBadge={hideBadge}
                 hideEdit={hideEdit}

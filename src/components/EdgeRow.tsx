@@ -3,20 +3,22 @@
 import { useState, useTransition, useEffect } from "react";
 import Link from "next/link";
 import EdgeRetractButton from "@/components/EdgeRetractButton";
+import ImageCropperModal from "@/components/ImageCropperModal";
 import { parseFuzzyTemporal, getInferredHint, getInferredBadge, formatNodeLifespan } from "@/lib/dateParser";
 import { getNodeDisplay } from "@/lib/nodeUtils";
-import { updateEdgeProperties } from "@/app/actions";
+import { updateEdgeProperties, getSecureMediaUrl, updateNodeProperties } from "@/app/actions";
 
 export default function EdgeRow({
   edge,
-  node,
+  node, // The connected target/source node
   isSource,
   predDef,
   currentTab,
   activeNodeId,
+  sourceNode, // NEW: The active node currently being viewed (passed from CollapsibleEdgeBlock)
   activeKinds,
   hideBadge = false,
-  hideEdit = false, // Prevents editing properties on raw structural edges like CARRIES
+  hideEdit = false, 
   canWrite = true,
   effectiveStart,
   effectiveEnd,
@@ -28,6 +30,7 @@ export default function EdgeRow({
   predDef: any;
   currentTab: string;
   activeNodeId: string;
+  sourceNode?: any;
   activeKinds: any[];
   hideBadge?: boolean;
   hideEdit?: boolean;
@@ -43,14 +46,18 @@ export default function EdgeRow({
   const [locator, setLocator] = useState(edge.properties?.locator || "");
   const [liveBounds, setLiveBounds] = useState<{start?: Date, end?: Date}>({});
   
+  // Cropper State
+  const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
+  const [isFetchingUrl, setIsFetchingUrl] = useState(false);
+
   const [isPending, startTransition] = useTransition();
 
   const displayPredicate = isSource ? predDef.forwardLabel : predDef.reverseLabel;
 
   // --------------------------------------------------------------------------
-  // UI DISPLAY ROUTING (Icons, Labels, and Dates extracted to DRY utilities)
+  // UI DISPLAY ROUTING & AVATARS
   // --------------------------------------------------------------------------
-  const { icon, kindLabel } = getNodeDisplay(node, activeKinds);
+  const { icon, kindLabel, avatarUrl } = getNodeDisplay(node, activeKinds);
   const nodeLifespanStr = formatNodeLifespan(node);
 
   useEffect(() => {
@@ -65,6 +72,60 @@ export default function EdgeRow({
       const props = locator.trim() ? { locator: locator.trim() } : {};
       await updateEdgeProperties(edge.id, temporalInput || null, props);
       setIsEditing(false);
+    });
+  };
+
+  // --------------------------------------------------------------------------
+  // PIN AVATAR LOGIC ("Source-Aware Cache")
+  // --------------------------------------------------------------------------
+  let canPin = false;
+  let mediaNodeToPin: any = null;
+  let targetNodeToUpdate: any = null;
+
+  if (node.layer === 'MEDIA' && node.properties?.mimeType?.startsWith('image/')) {
+      // The row we are looking at is an Image. We can pin it if the Active Node is Identity/Physical.
+      if (sourceNode && (sourceNode.layer === 'IDENTITY' || sourceNode.layer === 'PHYSICAL')) {
+          canPin = true;
+          mediaNodeToPin = node;
+          targetNodeToUpdate = sourceNode;
+      }
+  } else if (sourceNode?.layer === 'MEDIA' && sourceNode?.properties?.mimeType?.startsWith('image/')) {
+      // The Active Node is an Image. We can pin it if the row we are looking at is an Identity/Physical.
+      if (node.layer === 'IDENTITY' || node.layer === 'PHYSICAL') {
+          canPin = true;
+          mediaNodeToPin = sourceNode;
+          targetNodeToUpdate = node;
+      }
+  }
+
+  const handlePinClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!mediaNodeToPin?.properties?.fileUrl) return;
+
+    setIsFetchingUrl(true);
+    try {
+      const filename = mediaNodeToPin.properties.fileUrl.split('/').pop();
+      if (filename) {
+        const secureUrl = await getSecureMediaUrl(filename, mediaNodeToPin.properties.mimeType);
+        setCropImageUrl(secureUrl);
+      }
+    } catch (err) {
+      console.error("Failed to load secure image for cropping", err);
+    } finally {
+      setIsFetchingUrl(false);
+    }
+  };
+
+  const handleConfirmCrop = (base64: string) => {
+    startTransition(async () => {
+      const updatedProps = {
+        ...(targetNodeToUpdate.properties || {}),
+        avatar_base64: base64,
+        avatar_source_id: mediaNodeToPin.id
+      };
+      // Overwrite the properties of the target node without creating a new node!
+      await updateNodeProperties(targetNodeToUpdate.id, updatedProps);
+      setCropImageUrl(null);
     });
   };
 
@@ -89,7 +150,6 @@ export default function EdgeRow({
           <button onClick={() => setIsEditing(false)} disabled={isPending} className="text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 cursor-pointer">✕</button>
         </div>
         
-        {/* Flex-col layout prevents inputs from squishing together in tight spaces */}
         <div className="flex flex-col gap-4">
           <div>
             <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
@@ -156,90 +216,118 @@ export default function EdgeRow({
     );
   }
 
-  // --- TOMBSTONE HANDLING (Zombie Links) ---
   const isTargetDead = node.isActive === false;
 
   return (
-    <div className={`group p-3 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg shadow-sm hover:shadow-md transition-all ${isTargetDead ? 'opacity-60 bg-gray-50/50 dark:bg-zinc-800/50' : ''}`}>
-      <div className="flex flex-wrap items-center gap-3">
-        {!hideBadge && (
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${isTargetDead ? 'bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-zinc-700' : predDef.isSystem ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800/50' : 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800/50'}`}>
-            {displayPredicate}
-          </span>
-        )}
-        
-        {/* Next.js Link to soft-update the URL, opening the target in the Peek Drawer instead of hard-navigating! */}
-        <Link 
-          scroll={false} 
-          href={`/?node=${activeNodeId}&tab=${currentTab}&peek=${node.id}`} 
-          className={`font-medium text-sm flex items-center gap-1.5 cursor-pointer max-w-full transition-colors ${isTargetDead ? 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200' : 'text-gray-900 dark:text-zinc-100 hover:text-blue-600 dark:hover:text-blue-400 hover:underline'}`}
-        >
-          <span className={`text-xs shrink-0 ${isTargetDead ? 'grayscale opacity-50' : 'opacity-80'}`} title={kindLabel}>{icon}</span>
-          <span className="truncate block">
-            <span className={isTargetDead ? 'line-through decoration-gray-400 dark:decoration-zinc-600' : ''}>{node.label}</span>
-            {isTargetDead && <span className="ml-2 text-[10px] font-bold text-red-500 uppercase tracking-widest no-underline">(Deleted)</span>}
-            {!isTargetDead && node.aliases && node.aliases.length > 0 && (
-              <span className="text-gray-400 dark:text-zinc-500 font-normal ml-1.5 text-[10px]">({node.aliases.join(', ')})</span>
-            )}
-            {!isTargetDead && nodeLifespanStr && (
-              <span className="text-gray-400 dark:text-zinc-500 font-mono ml-1.5 text-[10px]">[{nodeLifespanStr}]</span>
-            )}
-          </span>
-        </Link>
-
-        {locator && (
-          <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${isTargetDead ? 'bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-zinc-700' : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50'}`} title="Locator / Position">
-            📍 {locator}
-          </span>
-        )}
-        
-        {edge.temporalInput === 'TIMELESS' ? (
-          <span className="text-[10px] font-bold uppercase tracking-widest bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 px-1.5 py-0.5 rounded border border-gray-200 dark:border-zinc-700 transition-colors" title="Timeless Relationship">
-            ⏱ Timeless
-          </span>
-        ) : edge.temporalInput ? (
-          <span className="text-[10px] font-mono bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 px-1.5 py-0.5 rounded border border-gray-200 dark:border-zinc-700 transition-colors" title="Relationship Temporal Bounds">
-            ⏱ {edge.temporalInput}
-          </span>
-        ) : (inferredBounds && !hideEdit) ? (
-          <span 
-            onClick={(e) => {
-              e.preventDefault();
-              if (canWrite && !hideEdit && !isTargetDead) setIsEditing(true);
-            }}
-            className={`text-[10px] font-mono bg-transparent text-gray-400 dark:text-zinc-500 px-1.5 py-0.5 rounded border border-dashed border-gray-300 dark:border-zinc-700 transition-colors ${canWrite && !hideEdit && !isTargetDead ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-zinc-800/50 hover:text-gray-600 dark:hover:text-zinc-300' : ''}`} 
-            title="Calculated from node lifespans. Click to define explicit bounds."
+    <>
+      <div className={`group p-3 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg shadow-sm hover:shadow-md transition-all ${isTargetDead ? 'opacity-60 bg-gray-50/50 dark:bg-zinc-800/50' : ''}`}>
+        <div className="flex flex-wrap items-center gap-3">
+          {!hideBadge && (
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${isTargetDead ? 'bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-zinc-700' : predDef.isSystem ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800/50' : 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800/50'}`}>
+              {displayPredicate}
+            </span>
+          )}
+          
+          <Link 
+            scroll={false} 
+            href={`/?node=${activeNodeId}&tab=${currentTab}&peek=${node.id}`} 
+            className={`font-medium text-sm flex items-center gap-2 cursor-pointer max-w-full transition-colors ${isTargetDead ? 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200' : 'text-gray-900 dark:text-zinc-100 hover:text-blue-600 dark:hover:text-blue-400 hover:underline'}`}
           >
-            ⏱ {getInferredBadge(effectiveStart, effectiveEnd)}
-          </span>
-        ) : null}
-        
-        <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pl-2">
-            {canWrite && !hideEdit && !isTargetDead && (
-              <button 
-                onClick={() => setIsEditing(true)}
-                className="text-xs font-medium text-blue-600 dark:text-blue-400 px-2 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md cursor-pointer transition-colors" 
-                title="Edit Edge Properties"
-              >
-                ✎ Edit
-              </button>
-            )}
-            
-            {/* Quick action to go to a dead node to restore it */}
-            {canWrite && isTargetDead && (
-               <Link 
-                 scroll={false}
-                 href={`/?node=${node.id}`}
-                 className="text-xs font-bold text-blue-500 dark:text-blue-400 px-2 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md cursor-pointer transition-colors uppercase tracking-widest" 
-                 title="Go to Tombstone"
-               >
-                 Restore
-               </Link>
-            )}
-            
-          {canWrite && <EdgeRetractButton edgeId={edge.id} />}
+            <span className={`flex items-center justify-center shrink-0 w-6 h-6 rounded-full ${isTargetDead ? 'grayscale opacity-50' : ''}`} title={kindLabel}>
+              {avatarUrl ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={avatarUrl} alt={node.label} className="w-full h-full rounded-full object-cover shadow-sm ring-1 ring-gray-200 dark:ring-zinc-700" />
+              ) : (
+                <span className={`text-base ${isTargetDead ? '' : 'opacity-80'}`}>{icon}</span>
+              )}
+            </span>
+            <span className="truncate block">
+              <span className={isTargetDead ? 'line-through decoration-gray-400 dark:decoration-zinc-600' : ''}>{node.label}</span>
+              {isTargetDead && <span className="ml-2 text-[10px] font-bold text-red-500 uppercase tracking-widest no-underline">(Deleted)</span>}
+              {!isTargetDead && node.aliases && node.aliases.length > 0 && (
+                <span className="text-gray-400 dark:text-zinc-500 font-normal ml-1.5 text-[10px]">({node.aliases.join(', ')})</span>
+              )}
+              {!isTargetDead && nodeLifespanStr && (
+                <span className="text-gray-400 dark:text-zinc-500 font-mono ml-1.5 text-[10px]">[{nodeLifespanStr}]</span>
+              )}
+            </span>
+          </Link>
+
+          {locator && (
+            <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${isTargetDead ? 'bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-zinc-700' : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50'}`} title="Locator / Position">
+              📍 {locator}
+            </span>
+          )}
+          
+          {edge.temporalInput === 'TIMELESS' ? (
+            <span className="text-[10px] font-bold uppercase tracking-widest bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 px-1.5 py-0.5 rounded border border-gray-200 dark:border-zinc-700 transition-colors" title="Timeless Relationship">
+              ⏱ Timeless
+            </span>
+          ) : edge.temporalInput ? (
+            <span className="text-[10px] font-mono bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400 px-1.5 py-0.5 rounded border border-gray-200 dark:border-zinc-700 transition-colors" title="Relationship Temporal Bounds">
+              ⏱ {edge.temporalInput}
+            </span>
+          ) : (inferredBounds && !hideEdit) ? (
+            <span 
+              onClick={(e) => {
+                e.preventDefault();
+                if (canWrite && !hideEdit && !isTargetDead) setIsEditing(true);
+              }}
+              className={`text-[10px] font-mono bg-transparent text-gray-400 dark:text-zinc-500 px-1.5 py-0.5 rounded border border-dashed border-gray-300 dark:border-zinc-700 transition-colors ${canWrite && !hideEdit && !isTargetDead ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-zinc-800/50 hover:text-gray-600 dark:hover:text-zinc-300' : ''}`} 
+              title="Calculated from node lifespans. Click to define explicit bounds."
+            >
+              ⏱ {getInferredBadge(effectiveStart, effectiveEnd)}
+            </span>
+          ) : null}
+          
+          <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pl-2">
+              {canPin && canWrite && !isTargetDead && (
+                <button 
+                  onClick={handlePinClick}
+                  disabled={isPending || isFetchingUrl}
+                  className="text-xs font-medium text-blue-600 dark:text-blue-400 px-2 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md cursor-pointer transition-colors" 
+                  title="Pin as Profile Picture"
+                >
+                  {isFetchingUrl ? "..." : "📍 Pin"}
+                </button>
+              )}
+              
+              {canWrite && !hideEdit && !isTargetDead && (
+                <button 
+                  onClick={() => setIsEditing(true)}
+                  className="text-xs font-medium text-blue-600 dark:text-blue-400 px-2 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md cursor-pointer transition-colors" 
+                  title="Edit Edge Properties"
+                >
+                  ✎ Edit
+                </button>
+              )}
+              
+              {/* Quick action to go to a dead node to restore it */}
+              {canWrite && isTargetDead && (
+                 <Link 
+                   scroll={false}
+                   href={`/?node=${node.id}`}
+                   className="text-xs font-bold text-blue-500 dark:text-blue-400 px-2 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md cursor-pointer transition-colors uppercase tracking-widest" 
+                   title="Go to Tombstone"
+                 >
+                   Restore
+                 </Link>
+              )}
+              
+            {canWrite && <EdgeRetractButton edgeId={edge.id} />}
+          </div>
         </div>
       </div>
-    </div>
+
+      {cropImageUrl && (
+        <ImageCropperModal
+          imageUrl={cropImageUrl}
+          maskShape={targetNodeToUpdate?.layer === 'PHYSICAL' ? 'square' : 'circle'}
+          isSaving={isPending}
+          onClose={() => setCropImageUrl(null)}
+          onConfirm={handleConfirmCrop}
+        />
+      )}
+    </>
   );
 }
