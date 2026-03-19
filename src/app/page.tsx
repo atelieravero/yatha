@@ -4,6 +4,7 @@ import { nodes, edges, SYSTEM_PREDICATES } from "@/db/schema";
 import { getSecureMediaUrl, getRecentNodes, getAllKinds, seedSystemPredicates, getAllPredicates } from "@/app/actions";
 import { getMediaDetails } from "@/lib/mediaUtils";
 import { groupEdges } from "@/lib/edgeGrouping";
+import { getNodeDisplay } from "@/lib/nodeUtils";
 
 import PropertiesEditor from "@/components/PropertiesEditor";
 import NodeClassification from "@/components/NodeClassification";
@@ -116,6 +117,9 @@ export default async function Home({
   const allKinds = await getAllKinds();
   const activeKinds = allKinds.filter(k => k.isActive);
 
+  // Extract the avatarUrl using our nodeUtils
+  const { avatarUrl } = getNodeDisplay(activeNode, activeKinds);
+
   const nodeProps = (activeNode.properties as Record<string, any>) || {};
   const { isImage, isVideo, isAudio, isPdf, isText, isYouTube, isWebLink, ytId, webUrl } = getMediaDetails(nodeProps);
   const hasFile = !!nodeProps.fileUrl || isYouTube || isWebLink;
@@ -182,7 +186,7 @@ export default async function Home({
           
           <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
-              <NodeLabelEditor nodeId={activeNode.id} initialLabel={activeNode.label} />
+              <NodeLabelEditor nodeId={activeNode.id} initialLabel={activeNode.label} avatarUrl={avatarUrl} />
               <AliasEditor nodeId={activeNode.id} initialAliases={activeNode.aliases || []} />
             </div>
             <div className="flex items-center gap-2 mt-2 md:mt-0 shrink-0">

@@ -95,7 +95,14 @@ export default function PropertiesEditor({
     return Array.from(new Set(values)) as string[];
   };
 
-  const displayProps = Object.entries(initialProps).filter(([k]) => k !== 'fileUrl' && k !== 'mimeType' && k !== 'temporal_input');
+  const displayProps = Object.entries(initialProps).filter(([k]) => 
+    k !== 'fileUrl' && 
+    k !== 'mimeType' && 
+    k !== 'temporal_input' &&
+    k !== 'avatar_base64' &&
+    k !== 'avatar_source_id' &&
+    k !== 'thumbnail_base64'
+  );
 
   // Read-Only Mode - Compact, title-less presentation
   if (!isEditing) {
